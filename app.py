@@ -21,7 +21,7 @@ def analyze_image_with_grok(image_data):
         "model": "grok-4",
         "messages": [
             {"role": "user", "content": [
-                {"type": "text", "text": "Describe this image in precise English detail, focusing only on visible elements. Structure as prompt for Higgsfield Diffuse: subject, appearance, clothing, action, environment, lighting, camera angle, style."},
+                {"type": "text", "text": "Describe this image in precise English detail, focusing only on visible elements. Structure as a single continuous paragraph prompt for Higgsfield Diffuse."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
             ]}
         ],
@@ -47,28 +47,50 @@ def merge_description_and_level(base_prompt, description, sex_level):
         "messages": [
             {
                 "role": "system",
-                "content": "Merge the base image prompt with the user's Japanese description and the specified sexiness level. "
-                           "Override clothing/exposure according to the level. Output ONLY the final English prompt text. No explanations."
+                "content": "You are an expert prompt engineer for Higgsfield Diffuse. "
+                           "Merge the base image prompt with the Japanese description and sexiness level. "
+                           "Override clothing and exposure strictly according to the level. "
+                           "Output ONLY one single continuous English paragraph as the final prompt. "
+                           "Start directly with 'A young...' or similar. "
+                           "Never use bullet points, sections, headings, Subject:, Appearance:, or any structured format. "
+                           "Do not add explanations or notes."
             },
-            {"role": "user", "content": f"Base prompt: {base_prompt}\nJapanese description: {description}\nSexiness level: {level_desc}"}
+            {"role": "user", "content": f"Base prompt: {base_prompt}\nJapanese description: {description}\nSexiness level instruction: {level_desc}"}
         ],
-        "max_tokens": 500
+        "max_tokens": 600
     }
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     response = requests.post(GROK_API_URL, json=payload, headers=headers)
     if response.status_code == 200:
         raw = response.json()["choices"][0]["message"]["content"].strip()
-        return raw.strip('"').strip()
+        # 後処理：箇条書きやセクションがあれば1文に連結
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        # セクションタイトルを除去して連結
+        cleaned_lines = []
+        for line in lines:
+            if ':' in line and any(line.lower().startswith(sec) for sec in ['subject', 'appearance', 'clothing', 'action', 'environment', 'lighting', 'camera', 'style']):
+                # タイトル後の内容だけ取り出す
+                cleaned_lines.append(line.split(':', 1)[1].strip())
+            else:
+                cleaned_lines.append(line)
+        final = ' '.join(cleaned_lines)
+        final = final.replace('  ', ' ').strip()
+        if final.startswith('"') and final.endswith('"'):
+            final = final[1:-1].strip()
+        return final
     return base_prompt
 
 def optimize_prompt(prompt):
     payload = {
         "model": "grok-4",
-        "messages": [{"role": "system", "content": "Optimize this prompt for Higgsfield Diffuse: shorter, clearer, more effective. Output only the prompt."},
-                     {"role": "user", "content": prompt}],
+        "messages": [
+            {"role": "system", "content": "Optimize this prompt for Higgsfield Diffuse: make it shorter, clearer, more effective. Output only the single paragraph prompt."},
+            {"role": "user", "content": prompt}
+        ],
         "max_tokens": 500
     }
-    response = requests.post(GROK_API_URL, json=payload, headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"})
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    response = requests.post(GROK_API_URL, json=payload, headers=headers)
     if response.status_code == 200:
         return response.json()["choices"][0]["message"]["content"].strip()
     return prompt
@@ -76,11 +98,14 @@ def optimize_prompt(prompt):
 def translate_to_japanese(prompt):
     payload = {
         "model": "grok-4",
-        "messages": [{"role": "system", "content": "Translate to natural fluent Japanese."},
-                     {"role": "user", "content": prompt}],
+        "messages": [
+            {"role": "system", "content": "Translate to natural fluent Japanese."},
+            {"role": "user", "content": prompt}
+        ],
         "max_tokens": 500
     }
-    response = requests.post(GROK_API_URL, json=payload, headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"})
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    response = requests.post(GROK_API_URL, json=payload, headers=headers)
     if response.status_code == 200:
         return response.json()["choices"][0]["message"]["content"].strip()
     return "翻訳に失敗しました。"
@@ -88,24 +113,23 @@ def translate_to_japanese(prompt):
 # UI
 st.title("Image to English Prompt Generator (Higgsfield向け)")
 
-# セクシーレベル選択
 st.markdown("### セクシーレベル（全画像共通）")
 sex_level = st.radio(
     "露出レベルを選んでください",
     options=[1, 2, 3, 4, 5],
     format_func=lambda x: f"レベル {x} - " + {
         1: "露出なし（普通の服）",
-        2: "軽微な露出（少し肌見せ）",
+        2: "軽微な露出",
         3: "谷間くらい、下着OKだが服着用",
-        4: "水着・下着だけ（服なし）",
+        4: "水着・下着だけ",
         5: "ほぼ全裸"
     }[x],
-    index=1  # デフォルトはレベル2
+    index=2  # デフォルトレベル3
 )
 
 uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
-description = st.text_area("記述欄（任意・日本語可）：例：Gカップ、黒髪ロング、赤いドレス", "身長、日本人")
+description = st.text_area("記述欄（任意・日本語可）：例：Gカップ、黒髪ロング、150cm、身長、日本人", "")
 
 if st.button("プロンプト生成"):
     if not uploaded_images:
@@ -119,7 +143,7 @@ if st.button("プロンプト生成"):
                 image_data = img.read()
                 base_prompt = analyze_image_with_grok(image_data)
                 
-                with st.spinner(f"画像{idx+1}に反映中..."):
+                with st.spinner(f"画像{idx+1}を処理中..."):
                     final_prompt = merge_description_and_level(base_prompt, description.strip(), sex_level)
                 
                 generated_prompts.append(final_prompt)
@@ -132,7 +156,7 @@ if st.session_state.prompt_history:
     st.markdown("### 生成履歴（最新10件）")
     for i, hist_prompt in enumerate(reversed(st.session_state.prompt_history[-10:])):
         hist_index = len(st.session_state.prompt_history) - 1 - i
-        with st.expander(f"履歴 {hist_index + 1}: {hist_prompt[:50]}..."):
+        with st.expander(f"履歴 {hist_index + 1}: {hist_prompt[:60]}..."):
             st.text_area("プロンプト", value=hist_prompt, height=150, key=f"hist_{i}")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -142,7 +166,7 @@ if st.session_state.prompt_history:
             with col3:
                 if st.button("最適化", key=f"opt_{i}"):
                     optimized = optimize_prompt(hist_prompt)
-                    st.text_area("最適化後", value=optimized, height=150, key=f"opt_{i}")
+                    st.text_area("最適化後", value=optimized, height=150, key=f"opt_res_{i}")
             with col4:
                 if st.button("日本語翻訳", key=f"trans_{i}"):
                     translated = translate_to_japanese(hist_prompt)
