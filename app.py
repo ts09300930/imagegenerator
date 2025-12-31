@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import os
 import base64
+from streamlit.components.v1 import html
 
 # Grok APIキーの設定
 API_KEY = os.environ.get("XAI_API_KEY")
@@ -12,12 +13,14 @@ if not API_KEY:
 # Grok APIエンドポイント
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
+# セッション状態の初期化（履歴保存用）
+if 'prompt_history' not in st.session_state:
+    st.session_state.prompt_history = []
+
 def analyze_image_with_grok(image_data):
-    """Grok APIを使用して画像を分析し、忠実な英語プロンプトを生成"""
     base64_image = base64.b64encode(image_data).decode('utf-8')
-    
     payload = {
-        "model": "grok-4",  # ここを修正（ビジョン対応の現在のモデル）
+        "model": "grok-4",  # ビジョン対応（必要に応じて最新モデルに更新）
         "messages": [
             {
                 "role": "user",
@@ -29,12 +32,7 @@ def analyze_image_with_grok(image_data):
         ],
         "max_tokens": 500
     }
-    
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     response = requests.post(GROK_API_URL, json=payload, headers=headers)
     if response.status_code == 200:
         return response.json()["choices"][0]["message"]["content"].strip()
@@ -42,43 +40,95 @@ def analyze_image_with_grok(image_data):
         st.error(f"APIエラー: {response.text}")
         return "プロンプト生成に失敗しました。"
 
+def optimize_prompt(prompt):
+    payload = {
+        "model": "grok-4",
+        "messages": [
+            {"role": "system", "content": "Optimize this English prompt for Higgsfield Diffuse: make it shorter, clearer, more effective, while keeping all key details."},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 500
+    }
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    response = requests.post(GROK_API_URL, json=payload, headers=headers)
+    if response.status_code == 200:
+        return response.json()["choices"][0]["message"]["content"].strip()
+    else:
+        st.error(f"最適化エラー: {response.text}")
+        return prompt
+
+def translate_to_japanese(prompt):
+    payload = {
+        "model": "grok-4",
+        "messages": [
+            {"role": "system", "content": "Translate this English prompt to natural, fluent Japanese."},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 500
+    }
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    response = requests.post(GROK_API_URL, json=payload, headers=headers)
+    if response.status_code == 200:
+        return response.json()["choices"][0]["message"]["content"].strip()
+    else:
+        st.error(f"翻訳エラー: {response.text}")
+        return "翻訳に失敗しました。"
+
+# コピー機能のHTMLコンポーネント
+def copy_button(text):
+    html(f"""
+    <button onclick="navigator.clipboard.writeText(`{text}`)">📋 コピー</button>
+    """, height=40)
+
 # Streamlit UI
 st.title("Image to English Prompt Generator (Higgsfield向け)")
 
-# 複数画像アップロード
-uploaded_images = st.file_uploader(
-    "画像をアップロードしてください（複数可）",
-    type=["jpg", "jpeg", "png"],
-    accept_multiple_files=True
-)
-
-# 記述欄（テキスト入力：優先適用）
+uploaded_images = st.file_uploader("画像をアップロードしてください（複数可）", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 description = st.text_area("記述欄（任意）：ここに英語で記述すると、全画像に対して優先適用されます", "")
 
-# 生成ボタン
 if st.button("プロンプト生成"):
-    if not uploaded_images:
-        st.warning("少なくとも1枚の画像をアップロードしてください。")
+    if not uploaded_images and not description.strip():
+        st.warning("画像をアップロードするか、記述を入力してください。")
     else:
+        generated_prompts = []
         if description.strip():
-            # 記述欄が優先：全画像に対して同じプロンプトを使用
             prompt = description.strip()
-            st.success("記述欄が優先されました。すべての画像に対して以下のプロンプトを使用可能です：")
-            st.text_area("生成プロンプト", value=prompt, height=200)
-            # 画像を表示
+            st.success("記述欄が優先されました。")
+            st.text_area("生成プロンプト（英語）", value=prompt, height=200, key="main_prompt")
             for img in uploaded_images:
                 st.image(img, caption="アップロード画像", use_column_width=True)
+            generated_prompts = [prompt] * len(uploaded_images or [1])
         else:
-            # 画像分析ベース：各画像ごとにプロンプト生成
             st.info("各画像に対して個別にプロンプトを生成します。")
             for idx, uploaded_image in enumerate(uploaded_images):
                 with st.expander(f"画像 {idx+1}: {uploaded_image.name}"):
-                    # 画像を表示
                     st.image(uploaded_image, caption="アップロード画像", use_column_width=True)
-                    
-                    # 分析
                     image_data = uploaded_image.read()
                     prompt = analyze_image_with_grok(image_data)
-                    st.text_area(f"生成されたプロンプト {idx+1}", value=prompt, height=200, key=f"prompt_{idx}")
+                    generated_prompts.append(prompt)
+                    st.text_area(f"生成プロンプト {idx+1}（英語）", value=prompt, height=200, key=f"prompt_{idx}")
+
+        # 履歴に追加
+        st.session_state.prompt_history.extend(generated_prompts)
+
+# 生成履歴の表示
+if st.session_state.prompt_history:
+    st.markdown("### 生成履歴（再利用可能）")
+    for i, hist_prompt in enumerate(reversed(st.session_state.prompt_history[-10:])):  # 最新10件
+        with st.expander(f"履歴 {len(st.session_state.prompt_history) - i}: {hist_prompt[:50]}..."):
+            st.text_area("履歴プロンプト", value=hist_prompt, height=150, key=f"hist_{i}")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                copy_button(hist_prompt)
+            with col2:
+                st.download_button("📥 ダウンロード", hist_prompt, file_name="prompt.txt", mime="text/plain")
+            with col3:
+                if st.button("最適化", key=f"opt_{i}"):
+                    optimized = optimize_prompt(hist_prompt)
+                    st.text_area("最適化後プロンプト", value=optimized, height=150)
+            with col4:
+                if st.button("日本語翻訳", key=f"trans_{i}"):
+                    translated = translate_to_japanese(hist_prompt)
+                    st.text_area("日本語翻訳（編集可能）", value=translated, height=150, key=f"jtrans_{i}")
 
 # 実行: streamlit run app.py
