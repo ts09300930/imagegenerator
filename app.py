@@ -42,11 +42,14 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
         5: "nearly nude, minimal coverage, topless or fully nude"
     }[sex_level]
 
-    additional = ""
+    # 強い追加指示を作成
+    strong_additions = []
     if tight_clothing:
-        additional += " Use tight-fitting, body-hugging, or form-fitting clothing that accentuates curves."
+        strong_additions.append("Make all clothing extremely tight-fitting, skin-tight, body-hugging, and clinging tightly to every curve of the body to strongly emphasize the figure.")
     if nipple_poke:
-        additional += " Include visible nipple outline or pokies through thin fabric."
+        strong_additions.append("Explicitly include visible nipple outlines, pokies, or erect nipples clearly poking through the thin fabric of the clothing.")
+
+    additional_instruction = " ".join(strong_additions)
 
     payload = {
         "model": "grok-4",
@@ -54,14 +57,15 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
             {
                 "role": "system",
                 "content": "You are an expert prompt engineer for Higgsfield Diffuse. "
-                           "Merge the base image prompt with the Japanese description, sexiness level, and additional instructions. "
-                           "Override clothing and exposure strictly according to the level and additional requests. "
+                           "Merge the base image prompt with the Japanese description and sexiness level. "
+                           "Strictly override clothing and exposure according to the level. "
+                           f"{additional_instruction} These additional instructions are mandatory and must be strongly reflected in the final prompt. "
                            "Output ONLY one single continuous English paragraph as the final prompt. "
                            "Start directly with 'A young...' or similar. "
                            "Never use bullet points, sections, headings, or structured format. "
                            "Do not add explanations."
             },
-            {"role": "user", "content": f"Base prompt: {base_prompt}\nJapanese description: {description}\nSexiness level: {level_desc}\nAdditional: {additional}"}
+            {"role": "user", "content": f"Base prompt: {base_prompt}\nJapanese description: {description}\nSexiness level: {level_desc}"}
         ],
         "max_tokens": 600
     }
@@ -133,8 +137,8 @@ sex_level = st.radio(
 
 st.markdown("### 追加オプション（全画像共通）")
 col_a, col_b = st.columns(2)
-tight_clothing = col_a.checkbox("タイトな服装（ボディライン強調）")
-nipple_poke = col_b.checkbox("乳首ぽち（布越しに乳首が浮き出る）")
+tight_clothing = col_a.checkbox("タイトな服装（ボディラインを強く強調）", value=False)
+nipple_poke = col_b.checkbox("乳首ぽち（布越しに強く浮き出る）", value=False)
 
 uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
