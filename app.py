@@ -20,7 +20,7 @@ if 'prompt_history' not in st.session_state:
 def analyze_image_with_grok(image_data):
     base64_image = base64.b64encode(image_data).decode('utf-8')
     payload = {
-        "model": "grok-4",  # ビジョン対応（必要に応じて最新モデルに更新）
+        "model": "grok-4",
         "messages": [
             {
                 "role": "user",
@@ -74,10 +74,13 @@ def translate_to_japanese(prompt):
         st.error(f"翻訳エラー: {response.text}")
         return "翻訳に失敗しました。"
 
-# コピー機能のHTMLコンポーネント
-def copy_button(text):
+# コピー機能のHTMLコンポーネント（一意のID付与）
+def copy_button(text, button_id):
     html(f"""
-    <button onclick="navigator.clipboard.writeText(`{text}`)">📋 コピー</button>
+    <button onclick="navigator.clipboard.writeText(`{text.replace('`', '\\`')}`)">📋 コピー</button>
+    <script>
+    document.getElementById('{button_id}').addEventListener('click', function() {{ navigator.clipboard.writeText(`{text.replace('`', '\\`')}`); }});
+    </script>
     """, height=40)
 
 # Streamlit UI
@@ -94,10 +97,10 @@ if st.button("プロンプト生成"):
         if description.strip():
             prompt = description.strip()
             st.success("記述欄が優先されました。")
-            st.text_area("生成プロンプト（英語）", value=prompt, height=200, key="main_prompt")
+            st.text_area("生成プロンプト（英語）", value=prompt, height=200, key="main_prompt_gen")
             for img in uploaded_images:
                 st.image(img, caption="アップロード画像", use_column_width=True)
-            generated_prompts = [prompt] * len(uploaded_images or [1])
+            generated_prompts = [prompt] * (len(uploaded_images) if uploaded_images else 1)
         else:
             st.info("各画像に対して個別にプロンプトを生成します。")
             for idx, uploaded_image in enumerate(uploaded_images):
@@ -106,26 +109,27 @@ if st.button("プロンプト生成"):
                     image_data = uploaded_image.read()
                     prompt = analyze_image_with_grok(image_data)
                     generated_prompts.append(prompt)
-                    st.text_area(f"生成プロンプト {idx+1}（英語）", value=prompt, height=200, key=f"prompt_{idx}")
+                    st.text_area(f"生成プロンプト {idx+1}（英語）", value=prompt, height=200, key=f"prompt_gen_{idx}")
 
         # 履歴に追加
         st.session_state.prompt_history.extend(generated_prompts)
 
 # 生成履歴の表示
 if st.session_state.prompt_history:
-    st.markdown("### 生成履歴（再利用可能）")
-    for i, hist_prompt in enumerate(reversed(st.session_state.prompt_history[-10:])):  # 最新10件
-        with st.expander(f"履歴 {len(st.session_state.prompt_history) - i}: {hist_prompt[:50]}..."):
-            st.text_area("履歴プロンプト", value=hist_prompt, height=150, key=f"hist_{i}")
+    st.markdown("### 生成履歴（最新10件、再利用可能）")
+    for i, hist_prompt in enumerate(reversed(st.session_state.prompt_history[-10:])):
+        hist_index = len(st.session_state.prompt_history) - 1 - i  # 元のインデックス
+        with st.expander(f"履歴 {hist_index + 1}: {hist_prompt[:50]}..."):
+            st.text_area("履歴プロンプト", value=hist_prompt, height=150, key=f"hist_text_{i}")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                copy_button(hist_prompt)
+                html(f"<button id='copy_btn_{i}' onclick=\"navigator.clipboard.writeText(`{hist_prompt.replace('`', '\\`')}`)\">📋 コピー</button>", height=40)
             with col2:
-                st.download_button("📥 ダウンロード", hist_prompt, file_name="prompt.txt", mime="text/plain")
+                st.download_button("📥 ダウンロード", hist_prompt, file_name=f"prompt_history_{hist_index + 1}.txt", mime="text/plain", key=f"dl_{i}")
             with col3:
                 if st.button("最適化", key=f"opt_{i}"):
                     optimized = optimize_prompt(hist_prompt)
-                    st.text_area("最適化後プロンプト", value=optimized, height=150)
+                    st.text_area("最適化後プロンプト", value=optimized, height=150, key=f"opt_result_{i}")
             with col4:
                 if st.button("日本語翻訳", key=f"trans_{i}"):
                     translated = translate_to_japanese(hist_prompt)
