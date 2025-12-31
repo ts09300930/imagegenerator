@@ -33,7 +33,7 @@ def analyze_image_with_grok(image_data):
         return response.json()["choices"][0]["message"]["content"].strip()
     return "プロンプト生成に失敗しました。"
 
-def merge_description_and_level(base_prompt, description, sex_level, tight_clothing, nipple_poke):
+def merge_description_and_level(base_prompt, description, sex_level, tight_clothing, nipple_poke, ample_bust):
     level_desc = {
         1: "fully clothed, modest outfit, no cleavage or skin exposure",
         2: "slight skin exposure, form-fitting clothes, minimal cleavage",
@@ -48,6 +48,8 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
         strong_additions.append("Make all clothing extremely tight-fitting, skin-tight, body-hugging, and clinging tightly to every curve of the body to strongly emphasize the figure.")
     if nipple_poke:
         strong_additions.append("Explicitly include visible nipple outlines, pokies, or erect nipples clearly poking through the thin fabric of the clothing.")
+    if ample_bust:
+        strong_additions.append("Strongly accentuate her ample bust and curvaceous figure, with clothing gently hugging her slender yet voluptuous body, revealing subtle minimal cleavage and slight skin exposure on her arms.")
 
     additional_instruction = " ".join(strong_additions)
 
@@ -136,9 +138,10 @@ sex_level = st.radio(
 )
 
 st.markdown("### 追加オプション（全画像共通）")
-col_a, col_b = st.columns(2)
+col_a, col_b, col_c = st.columns(3)
 tight_clothing = col_a.checkbox("タイトな服装（ボディラインを強く強調）", value=False)
 nipple_poke = col_b.checkbox("乳首ぽち（布越しに強く浮き出る）", value=False)
+ample_bust = col_c.checkbox("豊満バスト強調（ample bust & curvaceous figure）", value=False)
 
 uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
@@ -158,7 +161,7 @@ if st.button("プロンプト生成"):
                 
                 with st.spinner(f"画像{idx+1}を処理中..."):
                     final_prompt = merge_description_and_level(
-                        base_prompt, description.strip(), sex_level, tight_clothing, nipple_poke
+                        base_prompt, description.strip(), sex_level, tight_clothing, nipple_poke, ample_bust
                     )
                 
                 generated_prompts.append(final_prompt)
