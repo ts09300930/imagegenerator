@@ -33,7 +33,7 @@ def analyze_image_with_grok(image_data):
         return response.json()["choices"][0]["message"]["content"].strip()
     return "プロンプト生成に失敗しました。"
 
-def merge_description_and_level(base_prompt, description, sex_level):
+def merge_description_and_level(base_prompt, description, sex_level, tight_clothing, nipple_poke):
     level_desc = {
         1: "fully clothed, modest outfit, no cleavage or skin exposure",
         2: "slight skin exposure, form-fitting clothes, minimal cleavage",
@@ -42,20 +42,26 @@ def merge_description_and_level(base_prompt, description, sex_level):
         5: "nearly nude, minimal coverage, topless or fully nude"
     }[sex_level]
 
+    additional = ""
+    if tight_clothing:
+        additional += " Use tight-fitting, body-hugging, or form-fitting clothing that accentuates curves."
+    if nipple_poke:
+        additional += " Include visible nipple outline or pokies through thin fabric."
+
     payload = {
         "model": "grok-4",
         "messages": [
             {
                 "role": "system",
                 "content": "You are an expert prompt engineer for Higgsfield Diffuse. "
-                           "Merge the base image prompt with the Japanese description and sexiness level. "
-                           "Override clothing and exposure strictly according to the level. "
+                           "Merge the base image prompt with the Japanese description, sexiness level, and additional instructions. "
+                           "Override clothing and exposure strictly according to the level and additional requests. "
                            "Output ONLY one single continuous English paragraph as the final prompt. "
                            "Start directly with 'A young...' or similar. "
-                           "Never use bullet points, sections, headings, Subject:, Appearance:, or any structured format. "
-                           "Do not add explanations or notes."
+                           "Never use bullet points, sections, headings, or structured format. "
+                           "Do not add explanations."
             },
-            {"role": "user", "content": f"Base prompt: {base_prompt}\nJapanese description: {description}\nSexiness level instruction: {level_desc}"}
+            {"role": "user", "content": f"Base prompt: {base_prompt}\nJapanese description: {description}\nSexiness level: {level_desc}\nAdditional: {additional}"}
         ],
         "max_tokens": 600
     }
@@ -63,13 +69,11 @@ def merge_description_and_level(base_prompt, description, sex_level):
     response = requests.post(GROK_API_URL, json=payload, headers=headers)
     if response.status_code == 200:
         raw = response.json()["choices"][0]["message"]["content"].strip()
-        # 後処理：箇条書きやセクションがあれば1文に連結
+        # 後処理で箇条書き対策
         lines = [line.strip() for line in raw.splitlines() if line.strip()]
-        # セクションタイトルを除去して連結
         cleaned_lines = []
         for line in lines:
             if ':' in line and any(line.lower().startswith(sec) for sec in ['subject', 'appearance', 'clothing', 'action', 'environment', 'lighting', 'camera', 'style']):
-                # タイトル後の内容だけ取り出す
                 cleaned_lines.append(line.split(':', 1)[1].strip())
             else:
                 cleaned_lines.append(line)
@@ -124,12 +128,17 @@ sex_level = st.radio(
         4: "水着・下着だけ",
         5: "ほぼ全裸"
     }[x],
-    index=2  # デフォルトレベル3
+    index=2
 )
+
+st.markdown("### 追加オプション（全画像共通）")
+col_a, col_b = st.columns(2)
+tight_clothing = col_a.checkbox("タイトな服装（ボディライン強調）")
+nipple_poke = col_b.checkbox("乳首ぽち（布越しに乳首が浮き出る）")
 
 uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
-description = st.text_area("記述欄（任意・日本語可）：例：Gカップ、黒髪ロング、150cm、身長、日本人", "")
+description = st.text_area("記述欄（任意・日本語可）：例：Gカップ、黒髪ロング、150cm", "")
 
 if st.button("プロンプト生成"):
     if not uploaded_images:
@@ -144,7 +153,9 @@ if st.button("プロンプト生成"):
                 base_prompt = analyze_image_with_grok(image_data)
                 
                 with st.spinner(f"画像{idx+1}を処理中..."):
-                    final_prompt = merge_description_and_level(base_prompt, description.strip(), sex_level)
+                    final_prompt = merge_description_and_level(
+                        base_prompt, description.strip(), sex_level, tight_clothing, nipple_poke
+                    )
                 
                 generated_prompts.append(final_prompt)
                 st.text_area(f"生成プロンプト {idx+1}（英語）", value=final_prompt, height=200, key=f"prompt_{idx}")
