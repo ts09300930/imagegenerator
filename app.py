@@ -141,6 +141,12 @@ tight_clothing = col_a.checkbox("タイトな服装（ボディラインを強�
 nipple_poke = col_b.checkbox("乳首ぽち（布越しに強く浮き出る）", value=False)
 ample_bust = col_c.checkbox("豊満バスト強調（ample bust & curvaceous figure）", value=False)
 
+st.markdown("### 画像構成オプション（全画像共通）")
+col_d, col_e, col_f = st.columns(3)
+mask_on = col_d.checkbox("白いマスク着用を追加", value=False)  # 起動時オフ
+iphone_selfie = col_e.checkbox("iPhoneを持って鏡自撮り構図", value=False)  # 起動時オフ
+face_hidden = col_f.checkbox("顔を生成しない（口から下または首から下のみ）", value=False)  # 起動時オフ
+
 uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png", "JPG", "JPEG", "PNG"], accept_multiple_files=True)  # 大文字拡張子も許可
 description = st.text_area("記述欄（任意・日本語可）：例：Gカップ、黒髪ロング、150cm", "")
 
@@ -154,11 +160,8 @@ if st.button("プロンプト生成"):
                 try:
                     # 画像検証（拡張子大文字対応 + Pillowで開けるかチェック）
                     image_bytes = img.read()
-                    # Pillowで開く（大文字拡張子でも内容がJPEGならOK）
                     pil_image = Image.open(io.BytesIO(image_bytes))
-                    # 検証通過したら表示
                     st.image(pil_image, caption="アップロード画像", use_column_width=True)
-                    # analyze関数用にバイトデータを保持
                     img.seek(0)
                     image_data = img.read()
                 except Exception as e:
@@ -171,6 +174,17 @@ if st.button("プロンプト生成"):
                     final_prompt = merge_description_and_level(
                         base_prompt, description.strip(), sex_level, tight_clothing, nipple_poke, ample_bust
                     )
+               
+                # 画像構成オプションをプロンプトに追加
+                additional_elements = []
+                if mask_on:
+                    additional_elements.append("wearing a white surgical face mask covering nose and mouth")
+                if iphone_selfie:
+                    additional_elements.append("taking a mirror selfie in front of a mirror, holding iPhone smartphone with one hand")
+                if face_hidden:
+                    additional_elements.append("face hidden or cropped, only from mouth down or neck down visible, anonymous style")
+                if additional_elements:
+                    final_prompt = final_prompt.rstrip(".") + ", " + ", ".join(additional_elements) + "."
                
                 generated_prompts.append(final_prompt)
                 st.text_area(f"生成プロンプト {idx+1}（英語）", value=final_prompt, height=200, key=f"prompt_{idx}")
