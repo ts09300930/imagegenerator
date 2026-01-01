@@ -3,7 +3,7 @@ import requests
 import os
 import base64
 from streamlit.components.v1 import html
-from PIL import Image
+from PIL import Image  # Pillowインポート追加
 import io
 
 # Grok APIキー
