@@ -9,7 +9,6 @@ API_KEY = os.environ.get("XAI_API_KEY")
 if not API_KEY:
     st.error("XAI_API_KEY が設定されていません。環境変数を設定してください。")
     st.stop()
-
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
 if 'prompt_history' not in st.session_state:
@@ -41,7 +40,6 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
         4: "wearing only bikini or lingerie, no outer clothing, highly revealing",
         5: "nearly nude, minimal coverage, topless or fully nude"
     }[sex_level]
-
     # 強い追加指示を作成
     strong_additions = []
     if tight_clothing:
@@ -50,9 +48,7 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
         strong_additions.append("Explicitly include visible nipple outlines, pokies, or erect nipples clearly poking through the thin fabric of the clothing.")
     if ample_bust:
         strong_additions.append("Strongly accentuate her ample bust and curvaceous figure, with clothing gently hugging her slender yet voluptuous body, revealing subtle minimal cleavage and slight skin exposure on her arms.")
-
     additional_instruction = " ".join(strong_additions)
-
     payload = {
         "model": "grok-4",
         "messages": [
@@ -143,8 +139,13 @@ tight_clothing = col_a.checkbox("タイトな服装（ボディラインを強�
 nipple_poke = col_b.checkbox("乳首ぽち（布越しに強く浮き出る）", value=False)
 ample_bust = col_c.checkbox("豊満バスト強調（ample bust & curvaceous figure）", value=False)
 
-uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+st.markdown("### 画像構成オプション（全画像共通）")
+col_d, col_e, col_f = st.columns(3)
+mask_on = col_d.checkbox("白いマスク着用を追加", value=False)  # 起動時オフ
+iphone_selfie = col_e.checkbox("iPhoneを持って鏡自撮り構図", value=False)  # 起動時オフ
+face_hidden = col_f.checkbox("顔を生成しない（口から下または首から下のみ）", value=False)  # 起動時オフ
 
+uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 description = st.text_area("記述欄（任意・日本語可）：例：Gカップ、黒髪ロング、150cm", "")
 
 if st.button("プロンプト生成"):
@@ -155,18 +156,29 @@ if st.button("プロンプト生成"):
         for idx, img in enumerate(uploaded_images):
             with st.expander(f"画像 {idx+1}: {img.name}"):
                 st.image(img, caption="アップロード画像", use_column_width=True)
-                
+               
                 image_data = img.read()
                 base_prompt = analyze_image_with_grok(image_data)
-                
+               
                 with st.spinner(f"画像{idx+1}を処理中..."):
                     final_prompt = merge_description_and_level(
                         base_prompt, description.strip(), sex_level, tight_clothing, nipple_poke, ample_bust
                     )
-                
+               
+                # 画像構成オプションをプロンプトに追加
+                additional_elements = []
+                if mask_on:
+                    additional_elements.append("wearing a white surgical face mask covering nose and mouth")
+                if iphone_selfie:
+                    additional_elements.append("taking a mirror selfie in front of a mirror, holding iPhone smartphone with one hand")
+                if face_hidden:
+                    additional_elements.append("face hidden or cropped, only from mouth down or neck down visible, anonymous style")
+                if additional_elements:
+                    final_prompt = final_prompt.rstrip(".") + ", " + ", ".join(additional_elements) + "."
+               
                 generated_prompts.append(final_prompt)
                 st.text_area(f"生成プロンプト {idx+1}（英語）", value=final_prompt, height=200, key=f"prompt_{idx}")
-        
+       
         st.session_state.prompt_history.extend(generated_prompts)
 
 # 履歴
