@@ -156,7 +156,7 @@ if st.button("プロンプト生成"):
         for idx, img in enumerate(uploaded_images):
             with st.expander(f"画像 {idx+1}: {img.name}"):
                 try:
-                    image_bytes = img.getvalue()  # getvalue()でバイト取得（大文字拡張子対応強化）
+                    image_bytes = img.getvalue()
                     pil_image = Image.open(io.BytesIO(image_bytes))
                     st.image(pil_image, caption="アップロード画像", use_column_width=True)
                     image_data = image_bytes
