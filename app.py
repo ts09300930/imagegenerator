@@ -6,6 +6,10 @@ from streamlit.components.v1 import html
 from PIL import Image
 import io
 
+# HEICサポートのために追加
+from pillow_heif import register_heif_opener
+register_heif_opener()  # これによりPILがHEICを読み込めるようになる
+
 # Grok APIキー
 API_KEY = os.environ.get("XAI_API_KEY")
 if not API_KEY:
@@ -142,7 +146,7 @@ col_d, col_e, col_f = st.columns(3)
 mask_on = col_d.checkbox("白いマスク着用を追加", value=False)
 iphone_selfie = col_e.checkbox("iPhoneを持って鏡自撮り構図", value=False)
 face_hidden = col_f.checkbox("顔を生成しない（口から下または首から下のみ）", value=False)
-uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png", "JPG", "JPEG", "PNG"], accept_multiple_files=True)
+uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png", "JPG", "JPEG", "PNG", "heic", "HEIC"], accept_multiple_files=True)
 description = st.text_area("記述欄（任意・日本語可）：例：Gカップ、黒髪ロング、150cm", "")
 
 if st.button("プロンプト生成"):
@@ -153,15 +157,22 @@ if st.button("プロンプト生成"):
         for idx, img in enumerate(uploaded_images):
             with st.expander(f"画像 {idx+1}: {img.name}"):
                 try:
-                    image_bytes = img.getvalue()
-                    # ストリーム位置を先頭にリセット
-                    img.seek(0)
-                    # Pillowで開いて検証・表示
+                    img.seek(0)  # 念のため先頭に戻す
                     pil_image = Image.open(img)
+
+                    # 表示用にRGBに変換（HEICや透過PNGなどで必要）
+                    if pil_image.mode in ("RGBA", "LA", "P"):
+                        pil_image = pil_image.convert("RGB")
+
                     st.image(pil_image, caption="アップロード画像", use_column_width=True)
-                    image_data = image_bytes  # bytesのまま使用
+
+                    # Grok APIに渡すためにJPEG bytesに変換
+                    img_bytes_io = io.BytesIO()
+                    pil_image.save(img_bytes_io, format="JPEG", quality=95)
+                    image_data = img_bytes_io.getvalue()
+
                 except Exception as e:
-                    st.error(f"画像 {idx+1} ({img.name}) は有効な画像ファイルではありません。JPEGまたはPNG形式のファイルをアップロードしてください（拡張子が.JPGでも内容がHEIC等の場合はエラーになります）。エラー: {str(e)}")
+                    st.error(f"画像 {idx+1} ({img.name}) を読み込めませんでした。対応形式：JPEG、PNG、HEIC（iPhone写真）。エラー: {str(e)}")
                     continue
                
                 base_prompt = analyze_image_with_grok(image_data)
