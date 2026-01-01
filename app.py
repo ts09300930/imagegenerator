@@ -11,6 +11,7 @@ API_KEY = os.environ.get("XAI_API_KEY")
 if not API_KEY:
     st.error("XAI_API_KEY が設定されていません。環境変数を設定してください。")
     st.stop()
+
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
 if 'prompt_history' not in st.session_state:
@@ -80,7 +81,7 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
             else:
                 cleaned_lines.append(line)
         final = ' '.join(cleaned_lines)
-        final = final.replace('  ', ' ').strip()
+        final = final.replace(' ', ' ').strip()
         if final.startswith('"') and final.endswith('"'):
             final = final[1:-1].strip()
         return final
@@ -118,7 +119,6 @@ def translate_to_japanese(prompt):
 
 # UI
 st.title("Image to English Prompt Generator (Higgsfield向け)")
-
 st.markdown("### セクシーレベル（全画像共通）")
 sex_level = st.radio(
     "露出レベルを選んでください",
@@ -132,19 +132,16 @@ sex_level = st.radio(
     }[x],
     index=2
 )
-
 st.markdown("### 追加オプション（全画像共通）")
 col_a, col_b, col_c = st.columns(3)
 tight_clothing = col_a.checkbox("タイトな服装（ボディラインを強く強調）", value=False)
 nipple_poke = col_b.checkbox("乳首ぽち（布越しに強く浮き出る）", value=False)
 ample_bust = col_c.checkbox("豊満バスト強調（ample bust & curvaceous figure）", value=False)
-
 st.markdown("### 画像構成オプション（全画像共通）")
 col_d, col_e, col_f = st.columns(3)
 mask_on = col_d.checkbox("白いマスク着用を追加", value=False)
 iphone_selfie = col_e.checkbox("iPhoneを持って鏡自撮り構図", value=False)
 face_hidden = col_f.checkbox("顔を生成しない（口から下または首から下のみ）", value=False)
-
 uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png", "JPG", "JPEG", "PNG"], accept_multiple_files=True)
 description = st.text_area("記述欄（任意・日本語可）：例：Gカップ、黒髪ロング、150cm", "")
 
@@ -157,21 +154,23 @@ if st.button("プロンプト生成"):
             with st.expander(f"画像 {idx+1}: {img.name}"):
                 try:
                     image_bytes = img.getvalue()
-                    # Pillowで開く（拡張子無視で内容検証）
-                    pil_image = Image.open(io.BytesIO(image_bytes))
+                    # ストリーム位置を先頭にリセット
+                    img.seek(0)
+                    # Pillowで開いて検証・表示
+                    pil_image = Image.open(img)
                     st.image(pil_image, caption="アップロード画像", use_column_width=True)
-                    image_data = image_bytes
+                    image_data = image_bytes  # bytesのまま使用
                 except Exception as e:
-                    st.error(f"画像 {idx+1} ({img.name}) は有効な画像ファイルではありません。対応形式（jpg/png）を確認してください。エラー: {str(e)}")
+                    st.error(f"画像 {idx+1} ({img.name}) は有効な画像ファイルではありません。JPEGまたはPNG形式のファイルをアップロードしてください（拡張子が.JPGでも内容がHEIC等の場合はエラーになります）。エラー: {str(e)}")
                     continue
-                
-                base_prompt = analyze_image_with_grok(image_data)
                
+                base_prompt = analyze_image_with_grok(image_data)
+              
                 with st.spinner(f"画像{idx+1}を処理中..."):
                     final_prompt = merge_description_and_level(
                         base_prompt, description.strip(), sex_level, tight_clothing, nipple_poke, ample_bust
                     )
-               
+              
                 # 画像構成オプションをプロンプトに追加
                 additional_elements = []
                 if mask_on:
@@ -182,10 +181,10 @@ if st.button("プロンプト生成"):
                     additional_elements.append("face hidden or cropped, only from mouth down or neck down visible, anonymous style")
                 if additional_elements:
                     final_prompt = final_prompt.rstrip(".") + ", " + ", ".join(additional_elements) + "."
-               
+              
                 generated_prompts.append(final_prompt)
                 st.text_area(f"生成プロンプト {idx+1}（英語）", value=final_prompt, height=200, key=f"prompt_{idx}")
-       
+      
         st.session_state.prompt_history.extend(generated_prompts)
 
 # 履歴
