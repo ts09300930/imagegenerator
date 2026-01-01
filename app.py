@@ -3,7 +3,7 @@ import requests
 import os
 import base64
 from streamlit.components.v1 import html
-from PIL import Image  # Pillowインポート追加
+from PIL import Image
 import io
 
 # Grok APIキー
@@ -42,7 +42,6 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
         4: "wearing only bikini or lingerie, no outer clothing, highly revealing",
         5: "nearly nude, minimal coverage, topless or fully nude"
     }[sex_level]
-    # 強い追加指示を作成
     strong_additions = []
     if tight_clothing:
         strong_additions.append("Make all clothing extremely tight-fitting, skin-tight, body-hugging, and clinging tightly to every curve of the body to strongly emphasize the figure.")
@@ -73,7 +72,6 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
     response = requests.post(GROK_API_URL, json=payload, headers=headers)
     if response.status_code == 200:
         raw = response.json()["choices"][0]["message"]["content"].strip()
-        # 後処理で箇条書き対策
         lines = [line.strip() for line in raw.splitlines() if line.strip()]
         cleaned_lines = []
         for line in lines:
@@ -143,11 +141,11 @@ ample_bust = col_c.checkbox("豊満バスト強調（ample bust & curvaceous fig
 
 st.markdown("### 画像構成オプション（全画像共通）")
 col_d, col_e, col_f = st.columns(3)
-mask_on = col_d.checkbox("白いマスク着用を追加", value=False)  # 起動時オフ
-iphone_selfie = col_e.checkbox("iPhoneを持って鏡自撮り構図", value=False)  # 起動時オフ
-face_hidden = col_f.checkbox("顔を生成しない（口から下または首から下のみ）", value=False)  # 起動時オフ
+mask_on = col_d.checkbox("白いマスク着用を追加", value=False)
+iphone_selfie = col_e.checkbox("iPhoneを持って鏡自撮り構図", value=False)
+face_hidden = col_f.checkbox("顔を生成しない（口から下または首から下のみ）", value=False)
 
-uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png", "JPG", "JPEG", "PNG"], accept_multiple_files=True)  # 大文字拡張子も許可
+uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png", "JPG", "JPEG", "PNG"], accept_multiple_files=True)
 description = st.text_area("記述欄（任意・日本語可）：例：Gカップ、黒髪ロング、150cm", "")
 
 if st.button("プロンプト生成"):
@@ -158,12 +156,10 @@ if st.button("プロンプト生成"):
         for idx, img in enumerate(uploaded_images):
             with st.expander(f"画像 {idx+1}: {img.name}"):
                 try:
-                    # 画像検証（拡張子大文字対応 + Pillowで開けるかチェック）
-                    image_bytes = img.read()
+                    image_bytes = img.getvalue()  # getvalue()でバイト取得（大文字拡張子対応強化）
                     pil_image = Image.open(io.BytesIO(image_bytes))
                     st.image(pil_image, caption="アップロード画像", use_column_width=True)
-                    img.seek(0)
-                    image_data = img.read()
+                    image_data = image_bytes
                 except Exception as e:
                     st.error(f"画像 {idx+1} ({img.name}) は有効な画像ファイルではありません。対応形式（jpg/png）を確認してください。エラー: {str(e)}")
                     continue
