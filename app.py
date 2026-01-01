@@ -3,7 +3,7 @@ import requests
 import os
 import base64
 from streamlit.components.v1 import html
-from PIL import Image  # Pillowインポート追加
+from PIL import Image
 import io
 
 # Grok APIキー
@@ -157,6 +157,7 @@ if st.button("プロンプト生成"):
             with st.expander(f"画像 {idx+1}: {img.name}"):
                 try:
                     image_bytes = img.getvalue()
+                    # Pillowで開く（拡張子無視で内容検証）
                     pil_image = Image.open(io.BytesIO(image_bytes))
                     st.image(pil_image, caption="アップロード画像", use_column_width=True)
                     image_data = image_bytes
