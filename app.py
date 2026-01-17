@@ -6,9 +6,9 @@ from streamlit.components.v1 import html
 from PIL import Image
 import io
 
-# HEICサポートのために追加
+# HEICサポート
 from pillow_heif import register_heif_opener
-register_heif_opener()  # これによりPILがHEICを読み込めるようになる
+register_heif_opener()
 
 # Grok APIキー
 API_KEY = os.environ.get("XAI_API_KEY")
@@ -18,6 +18,7 @@ if not API_KEY:
 
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
+# 履歴を (prompt, image_bytes) のタプルで保持するように変更
 if 'prompt_history' not in st.session_state:
     st.session_state.prompt_history = []
 
@@ -39,7 +40,7 @@ def analyze_image_with_grok(image_data):
         return response.json()["choices"][0]["message"]["content"].strip()
     return "プロンプト生成に失敗しました。"
 
-def merge_description_and_level(base_prompt, description, sex_level, tight_clothing, nipple_poke, ample_bust):
+def merge_description_and_level(base_prompt, description, sex_level, tight_clothing, nipple_poke, bust_type):
     level_desc = {
         1: "fully clothed, modest outfit, no cleavage or skin exposure",
         2: "slight skin exposure, form-fitting clothes, minimal cleavage",
@@ -47,14 +48,22 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
         4: "wearing only bikini or lingerie, no outer clothing, highly revealing",
         5: "nearly nude, minimal coverage, topless or fully nude"
     }[sex_level]
+
     strong_additions = []
     if tight_clothing:
         strong_additions.append("Make all clothing extremely tight-fitting, skin-tight, body-hugging, and clinging tightly to every curve of the body to strongly emphasize the figure.")
     if nipple_poke:
         strong_additions.append("Explicitly include visible nipple outlines, pokies, or erect nipples clearly poking through the thin fabric of the clothing.")
-    if ample_bust:
+
+    # 貧乳選択時は豊満表現を強制除去する指示を追加
+    bust_instruction = ""
+    if bust_type == "貧乳":
+        bust_instruction = "NEVER use words like ample, busty, voluptuous, large breasts, big chest, curvaceous figure, cleavage emphasis, or any description suggesting breast volume. Strictly avoid any positive breast size description."
+    elif bust_type == "豊満":
         strong_additions.append("Strongly accentuate her ample bust and curvaceous figure, with clothing gently hugging her slender yet voluptuous body, revealing subtle minimal cleavage and slight skin exposure on her arms.")
+
     additional_instruction = " ".join(strong_additions)
+
     payload = {
         "model": "grok-4",
         "messages": [
@@ -63,7 +72,8 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
                 "content": "You are an expert prompt engineer for Higgsfield Diffuse. "
                            "Merge the base image prompt with the Japanese description and sexiness level. "
                            "Strictly override clothing and exposure according to the level. "
-                           f"{additional_instruction} These additional instructions are mandatory and must be strongly reflected in the final prompt. "
+                           f"{additional_instruction} {bust_instruction} "
+                           "These additional instructions are mandatory and must be strongly reflected in the final prompt. "
                            "Output ONLY one single continuous English paragraph as the final prompt. "
                            "Start directly with 'A young...' or similar. "
                            "Never use bullet points, sections, headings, or structured format. "
@@ -85,7 +95,7 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
             else:
                 cleaned_lines.append(line)
         final = ' '.join(cleaned_lines)
-        final = final.replace(' ', ' ').strip()
+        final = final.replace('  ', ' ').strip()
         if final.startswith('"') and final.endswith('"'):
             final = final[1:-1].strip()
         return final
@@ -121,8 +131,10 @@ def translate_to_japanese(prompt):
         return response.json()["choices"][0]["message"]["content"].strip()
     return "翻訳に失敗しました。"
 
-# UI
+# ── UI ───────────────────────────────────────────────────────────────
+
 st.title("Image to English Prompt Generator (Higgsfield向け)")
+
 st.markdown("### セクシーレベル（全画像共通）")
 sex_level = st.radio(
     "露出レベルを選んでください",
@@ -136,16 +148,25 @@ sex_level = st.radio(
     }[x],
     index=2
 )
+
+st.markdown("### 胸のタイプ（全画像共通）")
+bust_type = st.radio(
+    "胸のサイズを選択してください",
+    options=["貧乳", "普通", "豊満"],
+    index=1
+)
+
 st.markdown("### 追加オプション（全画像共通）")
-col_a, col_b, col_c = st.columns(3)
+col_a, col_b = st.columns(2)
 tight_clothing = col_a.checkbox("タイトな服装（ボディラインを強く強調）", value=False)
 nipple_poke = col_b.checkbox("乳首ぽち（布越しに強く浮き出る）", value=False)
-ample_bust = col_c.checkbox("豊満バスト強調（ample bust & curvaceous figure）", value=False)
+
 st.markdown("### 画像構成オプション（全画像共通）")
 col_d, col_e, col_f = st.columns(3)
 mask_on = col_d.checkbox("白いマスク着用を追加", value=False)
 iphone_selfie = col_e.checkbox("iPhoneを持って鏡自撮り構図", value=False)
 face_hidden = col_f.checkbox("顔を生成しない（口から下または首から下のみ）", value=False)
+
 uploaded_images = st.file_uploader("画像をアップロード（複数可）", type=["jpg", "jpeg", "png", "JPG", "JPEG", "PNG", "heic", "HEIC"], accept_multiple_files=True)
 description = st.text_area("記述欄（任意・日本語可）：例：Gカップ、黒髪ロング、150cm", "")
 
@@ -157,32 +178,31 @@ if st.button("プロンプト生成"):
         for idx, img in enumerate(uploaded_images):
             with st.expander(f"画像 {idx+1}: {img.name}"):
                 try:
-                    img.seek(0)  # 念のため先頭に戻す
+                    img.seek(0)
                     pil_image = Image.open(img)
-
-                    # 表示用にRGBに変換（HEICや透過PNGなどで必要）
                     if pil_image.mode in ("RGBA", "LA", "P"):
                         pil_image = pil_image.convert("RGB")
-
                     st.image(pil_image, caption="アップロード画像", use_column_width=True)
 
-                    # Grok APIに渡すためにJPEG bytesに変換
                     img_bytes_io = io.BytesIO()
                     pil_image.save(img_bytes_io, format="JPEG", quality=95)
                     image_data = img_bytes_io.getvalue()
 
+                    # 表示用画像バイトも保存するため、ここでバイトを取得
+                    display_img_bytes = img.getvalue()  # 元のUploadedFileのバイト
+
                 except Exception as e:
-                    st.error(f"画像 {idx+1} ({img.name}) を読み込めませんでした。対応形式：JPEG、PNG、HEIC（iPhone写真）。エラー: {str(e)}")
+                    st.error(f"画像 {idx+1} ({img.name}) を読み込めませんでした。対応形式：JPEG、PNG、HEIC。エラー: {str(e)}")
                     continue
-               
+
                 base_prompt = analyze_image_with_grok(image_data)
-              
+
                 with st.spinner(f"画像{idx+1}を処理中..."):
                     final_prompt = merge_description_and_level(
-                        base_prompt, description.strip(), sex_level, tight_clothing, nipple_poke, ample_bust
+                        base_prompt, description.strip(), sex_level, tight_clothing, nipple_poke, bust_type
                     )
-              
-                # 画像構成オプションをプロンプトに追加
+
+                # 構成オプション追加
                 additional_elements = []
                 if mask_on:
                     additional_elements.append("wearing a white surgical face mask covering nose and mouth")
@@ -192,19 +212,41 @@ if st.button("プロンプト生成"):
                     additional_elements.append("face hidden or cropped, only from mouth down or neck down visible, anonymous style")
                 if additional_elements:
                     final_prompt = final_prompt.rstrip(".") + ", " + ", ".join(additional_elements) + "."
-              
-                generated_prompts.append(final_prompt)
-                st.text_area(f"生成プロンプト {idx+1}（英語）", value=final_prompt, height=200, key=f"prompt_{idx}")
-      
-        st.session_state.prompt_history.extend(generated_prompts)
 
-# 履歴
+                # 貧乳時は専用プロンプトを末尾に強制追加
+                if bust_type == "貧乳":
+                    flat_chest_prompt = (
+                        " extremely emaciated petite delicate frame with prominent skeletal visibility, "
+                        "completely concave flat torso with absolute zero volume or forward protrusion, "
+                        "deeply recessed chest cavity, sharply visible ribs and sternum through thin skin, "
+                        "exaggerated prominent collarbones, bony emaciated upper torso, extremely narrow ribcage, "
+                        "ultra-skinny malnourished athletic build, (completely flat chest:2.0), (concave chest:1.95), "
+                        "(zero chest volume:1.9), (no protrusion whatsoever:1.85), (androgynous bony flat torso:1.6)"
+                    )
+                    final_prompt = final_prompt.rstrip(".") + flat_chest_prompt + "."
+
+                generated_prompts.append(final_prompt)
+
+                # 履歴に (prompt, 画像バイト) を保存
+                st.session_state.prompt_history.append((final_prompt, display_img_bytes))
+
+                st.text_area(f"生成プロンプト {idx+1}（英語）", value=final_prompt, height=200, key=f"prompt_{idx}")
+
+# 履歴表示
 if st.session_state.prompt_history:
     st.markdown("### 生成履歴（最新10件）")
-    for i, hist_prompt in enumerate(reversed(st.session_state.prompt_history[-10:])):
+    for i, (hist_prompt, hist_image_bytes) in enumerate(reversed(st.session_state.prompt_history[-10:])):
         hist_index = len(st.session_state.prompt_history) - 1 - i
         with st.expander(f"履歴 {hist_index + 1}: {hist_prompt[:60]}..."):
+            # 保存した画像を表示
+            try:
+                pil_hist_img = Image.open(io.BytesIO(hist_image_bytes))
+                st.image(pil_hist_img, caption=f"使用画像 {hist_index + 1}", use_column_width=True)
+            except:
+                st.warning("履歴画像の表示に失敗しました")
+
             st.text_area("プロンプト", value=hist_prompt, height=150, key=f"hist_{i}")
+
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 html(f"<button onclick=\"navigator.clipboard.writeText(`{hist_prompt.replace('`', '\\`')}`)\">コピー</button>", height=40)
