@@ -18,7 +18,6 @@ if not API_KEY:
 
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
-# 履歴を (prompt, image_bytes) のタプルで保持するように変更
 if 'prompt_history' not in st.session_state:
     st.session_state.prompt_history = []
 
@@ -55,14 +54,25 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
     if nipple_poke:
         strong_additions.append("Explicitly include visible nipple outlines, pokies, or erect nipples clearly poking through the thin fabric of the clothing.")
 
-    # 貧乳選択時は豊満表現を強制除去する指示を追加
     bust_instruction = ""
     if bust_type == "貧乳":
-        bust_instruction = "NEVER use words like ample, busty, voluptuous, large breasts, big chest, curvaceous figure, cleavage emphasis, or any description suggesting breast volume. Strictly avoid any positive breast size description."
+        bust_instruction = (
+            "Strictly describe small, flat or minimal breasts only. "
+            "NEVER use words like ample, busty, voluptuous, large, big, full, curvaceous, cleavage emphasis, "
+            "or any term suggesting breast volume or protrusion. "
+            "Always keep breast area completely flat or very small."
+        )
     elif bust_type == "豊満":
         strong_additions.append("Strongly accentuate her ample bust and curvaceous figure, with clothing gently hugging her slender yet voluptuous body, revealing subtle minimal cleavage and slight skin exposure on her arms.")
 
     additional_instruction = " ".join(strong_additions)
+
+    # 服装厳守の強制指示を追加（特にレベル1対策）
+    strict_clothing_rule = (
+        "When sex_level is 1, clothing MUST be completely opaque, thick, fully covering the entire torso and chest with NO skin visible, "
+        "NO see-through effect, NO bare skin, NO nudity, NO exposed chest even under extreme body descriptions. "
+        "Clothing takes absolute priority over any body shape description."
+    )
 
     payload = {
         "model": "grok-4",
@@ -72,7 +82,7 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
                 "content": "You are an expert prompt engineer for Higgsfield Diffuse. "
                            "Merge the base image prompt with the Japanese description and sexiness level. "
                            "Strictly override clothing and exposure according to the level. "
-                           f"{additional_instruction} {bust_instruction} "
+                           f"{additional_instruction} {bust_instruction} {strict_clothing_rule} "
                            "These additional instructions are mandatory and must be strongly reflected in the final prompt. "
                            "Output ONLY one single continuous English paragraph as the final prompt. "
                            "Start directly with 'A young...' or similar. "
@@ -131,8 +141,7 @@ def translate_to_japanese(prompt):
         return response.json()["choices"][0]["message"]["content"].strip()
     return "翻訳に失敗しました。"
 
-# ── UI ───────────────────────────────────────────────────────────────
-
+# UI
 st.title("Image to English Prompt Generator (Higgsfield向け)")
 
 st.markdown("### セクシーレベル（全画像共通）")
@@ -188,8 +197,7 @@ if st.button("プロンプト生成"):
                     pil_image.save(img_bytes_io, format="JPEG", quality=95)
                     image_data = img_bytes_io.getvalue()
 
-                    # 表示用画像バイトも保存するため、ここでバイトを取得
-                    display_img_bytes = img.getvalue()  # 元のUploadedFileのバイト
+                    display_img_bytes = img.getvalue()  # 元のバイト
 
                 except Exception as e:
                     st.error(f"画像 {idx+1} ({img.name}) を読み込めませんでした。対応形式：JPEG、PNG、HEIC。エラー: {str(e)}")
@@ -202,7 +210,6 @@ if st.button("プロンプト生成"):
                         base_prompt, description.strip(), sex_level, tight_clothing, nipple_poke, bust_type
                     )
 
-                # 構成オプション追加
                 additional_elements = []
                 if mask_on:
                     additional_elements.append("wearing a white surgical face mask covering nose and mouth")
@@ -211,42 +218,39 @@ if st.button("プロンプト生成"):
                 if face_hidden:
                     additional_elements.append("face hidden or cropped, only from mouth down or neck down visible, anonymous style")
                 if additional_elements:
-                    final_prompt = final_prompt.rstrip(".") + ", " + ", ".join(additional_elements) + "."
+                    final_prompt = final_prompt.rstrip(".") + ", " + ", ".join(additional_elements)
 
-                # 貧乳時は専用プロンプトを末尾に強制追加
+                # 貧乳時は穏やかな表現のみ追加
                 if bust_type == "貧乳":
                     flat_chest_prompt = (
-                        " extremely emaciated petite delicate frame with prominent skeletal visibility, "
-                        "completely concave flat torso with absolute zero volume or forward protrusion, "
-                        "deeply recessed chest cavity, sharply visible ribs and sternum through thin skin, "
-                        "exaggerated prominent collarbones, bony emaciated upper torso, extremely narrow ribcage, "
-                        "ultra-skinny malnourished athletic build, (completely flat chest:2.0), (concave chest:1.95), "
-                        "(zero chest volume:1.9), (no protrusion whatsoever:1.85), (androgynous bony flat torso:1.6)"
+                        ", small flat chest, very small breasts, minimal breast volume, "
+                        "petite slender upper body, delicate and slim torso, flat chest with no protrusion"
                     )
-                    final_prompt = final_prompt.rstrip(".") + flat_chest_prompt + "."
+                    final_prompt += flat_chest_prompt
+
+                # 保険：特にレベル1のとき服装を最後に再強調
+                if sex_level == 1:
+                    final_prompt += ", thick opaque clothing fully covering the entire upper body and chest, no skin visible, completely modest and non-transparent outfit."
+
+                final_prompt += "."
 
                 generated_prompts.append(final_prompt)
-
-                # 履歴に (prompt, 画像バイト) を保存
                 st.session_state.prompt_history.append((final_prompt, display_img_bytes))
 
                 st.text_area(f"生成プロンプト {idx+1}（英語）", value=final_prompt, height=200, key=f"prompt_{idx}")
 
-# 履歴表示
+# 履歴表示（変更なし）
 if st.session_state.prompt_history:
     st.markdown("### 生成履歴（最新10件）")
     for i, (hist_prompt, hist_image_bytes) in enumerate(reversed(st.session_state.prompt_history[-10:])):
         hist_index = len(st.session_state.prompt_history) - 1 - i
         with st.expander(f"履歴 {hist_index + 1}: {hist_prompt[:60]}..."):
-            # 保存した画像を表示
             try:
                 pil_hist_img = Image.open(io.BytesIO(hist_image_bytes))
                 st.image(pil_hist_img, caption=f"使用画像 {hist_index + 1}", use_column_width=True)
             except:
                 st.warning("履歴画像の表示に失敗しました")
-
             st.text_area("プロンプト", value=hist_prompt, height=150, key=f"hist_{i}")
-
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 html(f"<button onclick=\"navigator.clipboard.writeText(`{hist_prompt.replace('`', '\\`')}`)\">コピー</button>", height=40)
