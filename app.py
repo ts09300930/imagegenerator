@@ -57,21 +57,23 @@ def merge_description_and_level(base_prompt, description, sex_level, tight_cloth
     bust_instruction = ""
     if bust_type == "貧乳":
         bust_instruction = (
-            "Strictly describe small, flat or minimal breasts only. "
-            "NEVER use words like ample, busty, voluptuous, large, big, full, curvaceous, cleavage emphasis, "
-            "or any term suggesting breast volume or protrusion. "
-            "Always keep breast area completely flat or very small."
+            "Strictly describe extremely small or completely flat chest with zero volume or protrusion. "
+            "Use only terms like flat chest, minimal breasts, no bust, petite bony torso, "
+            "prominent collarbones, narrow ribcage, bony shoulders, ultra-slender upper body. "
+            "NEVER mention ample, busty, large, full, curvaceous, cleavage, or any breast volume positive term."
         )
     elif bust_type == "豊満":
         strong_additions.append("Strongly accentuate her ample bust and curvaceous figure, with clothing gently hugging her slender yet voluptuous body, revealing subtle minimal cleavage and slight skin exposure on her arms.")
 
     additional_instruction = " ".join(strong_additions)
 
-    # 服装厳守の強制指示を追加（特にレベル1対策）
+    # 服装厳守の強制指示（透け・裸体化を徹底防止）
     strict_clothing_rule = (
-        "When sex_level is 1, clothing MUST be completely opaque, thick, fully covering the entire torso and chest with NO skin visible, "
-        "NO see-through effect, NO bare skin, NO nudity, NO exposed chest even under extreme body descriptions. "
-        "Clothing takes absolute priority over any body shape description."
+        "Clothing and exposure MUST be strictly followed regardless of body description. "
+        "For level 1: thick opaque non-transparent fully covering modest clothes, no see-through, "
+        "no bare skin on torso/chest, no nudity, no translucent fabric, no skin visibility through clothing, "
+        "even with slender, bony, or flat chest descriptions. "
+        "Body shape NEVER overrides clothing coverage. Clothing takes absolute priority."
     )
 
     payload = {
@@ -197,7 +199,7 @@ if st.button("プロンプト生成"):
                     pil_image.save(img_bytes_io, format="JPEG", quality=95)
                     image_data = img_bytes_io.getvalue()
 
-                    display_img_bytes = img.getvalue()  # 元のバイト
+                    display_img_bytes = img.getvalue()
 
                 except Exception as e:
                     st.error(f"画像 {idx+1} ({img.name}) を読み込めませんでした。対応形式：JPEG、PNG、HEIC。エラー: {str(e)}")
@@ -220,17 +222,18 @@ if st.button("プロンプト生成"):
                 if additional_elements:
                     final_prompt = final_prompt.rstrip(".") + ", " + ", ".join(additional_elements)
 
-                # 貧乳時は穏やかな表現のみ追加
+                # 貧乳時は骨感を軽く戻した表現を追加
                 if bust_type == "貧乳":
                     flat_chest_prompt = (
-                        ", small flat chest, very small breasts, minimal breast volume, "
-                        "petite slender upper body, delicate and slim torso, flat chest with no protrusion"
+                        ", extremely petite and slender build, prominent collarbones, narrow ribcage, "
+                        "bony shoulders, ultra-skinny upper torso, completely flat chest with zero volume, "
+                        "(flat chest:1.9), (no breast protrusion:1.8), (minimal upper body curves:1.7)"
                     )
                     final_prompt += flat_chest_prompt
 
-                # 保険：特にレベル1のとき服装を最後に再強調
+                # 露出レベル1のとき服装を最後に強く再指定（透け防止強化）
                 if sex_level == 1:
-                    final_prompt += ", thick opaque clothing fully covering the entire upper body and chest, no skin visible, completely modest and non-transparent outfit."
+                    final_prompt += ", thick opaque fabric fully covering chest and torso, completely non-transparent clothing, no skin or body details visible through fabric, modest fully clothed appearance."
 
                 final_prompt += "."
 
@@ -239,7 +242,7 @@ if st.button("プロンプト生成"):
 
                 st.text_area(f"生成プロンプト {idx+1}（英語）", value=final_prompt, height=200, key=f"prompt_{idx}")
 
-# 履歴表示（変更なし）
+# 履歴表示
 if st.session_state.prompt_history:
     st.markdown("### 生成履歴（最新10件）")
     for i, (hist_prompt, hist_image_bytes) in enumerate(reversed(st.session_state.prompt_history[-10:])):
