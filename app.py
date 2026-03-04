@@ -85,8 +85,14 @@ with tab1:
 
 with tab2:
     if st.button("🎲 AIに新しいシチュエーションを提案させる"):
-        with st.spinner("AIが考案中..."):
-            prompt = [{"role": "user", "content": "Suggest a creative photo scene: '場所：〇〇、服装：××、状態：△△'. Japanese, 1 line."}]
+        with st.spinner("リアルな投稿ネタを考案中..."):
+            # ★ここをウラ垢女子・SNS自撮り系に特化した指示に変更
+            prompt = [{"role": "user", "content": (
+                "Suggest a realistic Japanese SNS selfie situation for a 'sexy influencer' style. "
+                "Themes: bedroom, hotel, bathroom, gym, after shower, or everyday outfit. "
+                "Format: '場所：〇〇、服装：××、状態：△△'. "
+                "Constraint: Real world only, no fantasy. Short and catchy Japanese one line."
+            )}]
             res = call_grok_api(prompt, max_tokens=100)
             if "Error" not in res:
                 st.session_state.scene_description = res
