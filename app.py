@@ -12,7 +12,7 @@ from streamlit.components.v1 import html
 # HEICサポート
 register_heif_opener()
 
-# --- 設定（動いていた頃の知見：grok-4 を使用） ---
+# --- 設定（2026年現在の主力モデル ID） ---
 GROK_MODEL = "grok-4" 
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
@@ -40,7 +40,7 @@ if not API_KEY:
     API_KEY = st.sidebar.text_input("Grok APIキー", type="password")
     if not API_KEY: st.stop()
 
-# --- コア関数（デグレ防止・エラーガード徹底） ---
+# --- コア関数（絶対にクラッシュさせないガード付き） ---
 def call_grok_api(messages):
     payload = {
         "model": GROK_MODEL, 
@@ -52,31 +52,22 @@ def call_grok_api(messages):
     
     try:
         res = requests.post(GROK_API_URL, json=payload, headers=headers, timeout=60)
-        
-        # 1. JSON解析試行
         try:
             json_res = res.json()
         except:
             return f"SYSTEM_ERROR_{res.status_code}: Non-JSON Response"
 
-        # 2. 成功判定
         if res.status_code == 200:
             if isinstance(json_res, dict) and "choices" in json_res:
                 return json_res["choices"][0]["message"]["content"].strip()
-            return "ERROR: Unexpected API Response Structure"
+            return "ERROR: Unexpected API Structure"
 
-        # 3. エラー時（辞書/文字列判定を厳密に行い 'get' エラーを完全封印）
-        msg = "Unknown Error"
+        # エラーメッセージ抽出（型チェックを徹底して 'str' object... エラーを防止）
+        msg = str(json_res)
         if isinstance(json_res, dict):
-            # errorキーが辞書であることを確認して取得
-            err_obj = json_res.get('error')
-            if isinstance(err_obj, dict):
-                msg = err_obj.get('message', str(json_res))
-            else:
-                msg = str(err_obj) if err_obj else str(json_res)
-        else:
-            msg = str(json_res)
-            
+            err = json_res.get('error')
+            if isinstance(err, dict):
+                msg = err.get('message', msg)
         return f"API_ERROR_{res.status_code}: {msg}"
 
     except Exception as e:
@@ -93,10 +84,12 @@ def process_image(uploaded_file):
 # --- 状態初期化 ---
 if 'prompt_history' not in st.session_state: st.session_state.prompt_history = []
 if 'char_description' not in st.session_state: st.session_state.char_description = ""
+if 'scenes_list' not in st.session_state: st.session_state.scenes_list = []
 
 # --- UI ---
-st.title("Higgsfield Gen v9.2 (Grok-4 Verified)")
+st.title("Higgsfield Gen v9.3 (デグレ修正・完全版)")
 
+# 1. 身体的特徴
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
 sel_h = st.selectbox("過去の履歴から選択", ["-- 履歴なし --"] + char_h)
@@ -104,7 +97,35 @@ if sel_h != "-- 履歴なし --": st.session_state.char_description = sel_h
 st.session_state.char_description = st.text_area("身体的特徴 (Gカップ、黒髪ロングなど)", value=st.session_state.char_description)
 
 st.markdown("---")
-st.markdown("### 🎬 2. 露出・体型設定 (過去のロジック継承)")
+
+# 2. シチュエーション設定（復活：画像解析 or AI自動生成）
+st.markdown("### 🎬 2. シチュエーション設定")
+mode = st.radio("入力モードを選択", ["📷 画像解析（アップロード）", "🎲 AI自動生成（テキスト）"], horizontal=True)
+
+targets = []
+if mode == "📷 画像解析（アップロード）":
+    uploaded_images = st.file_uploader("画像をアップロード", type=["jpg","png","heic"], accept_multiple_files=True)
+    if uploaded_images:
+        for f in uploaded_images:
+            targets.append({"type": "image", "content": f})
+else:
+    c1, c2 = st.columns([1, 2])
+    gen_count = c1.selectbox("生成数", options=list(range(1, 11)), index=0)
+    if c2.button(f"🎲 {gen_count}件を自動提案", use_container_width=True):
+        res = call_grok_api([{"role": "user", "content": f"日本のSNS自撮り風。'場所：、服装：、状態：'の形式で{gen_count}件考えて。"}] )
+        if "ERROR" not in res:
+            st.session_state.scenes_list = [s.strip() for s in res.split('\n') if "場所" in s][:gen_count]
+    
+    # 提案されたリストを表示・編集可能にする
+    for i, scene in enumerate(st.session_state.scenes_list):
+        st.session_state.scenes_list[i] = st.text_area(f"案 {i+1}", value=scene, key=f"scene_{i}")
+    for s in st.session_state.scenes_list:
+        targets.append({"type": "text", "content": s})
+
+st.markdown("---")
+
+# 3. 共通オプション
+st.markdown("### ⚙️ 3. オプション設定")
 col_opt1, col_opt2 = st.columns(2)
 sex_level = col_opt1.select_slider("露出レベル", options=[1, 2, 3, 4, 5], value=3)
 bust_type = col_opt2.radio("胸のサイズ", ["貧乳", "普通", "豊満"], index=1, horizontal=True)
@@ -119,46 +140,50 @@ iphone_selfie = cd.checkbox("iPhone鏡自撮り")
 face_hidden = ce.checkbox("顔を隠す")
 angle_type = st.selectbox("アングル", ["標準", "俯瞰 (from above)", "アオリ (from below)", "横から (from side)"])
 
-st.markdown("---")
-uploaded_images = st.file_uploader("画像をアップロード", type=["jpg","png","heic"], accept_multiple_files=True)
-
+# --- 生成実行 ---
 if st.button("🚀 プロンプトを一括生成", type="primary", use_container_width=True):
-    if not uploaded_images:
-        st.warning("画像をアップロードしてください。")
+    if not targets:
+        st.warning("画像かシチュエーション案を入力してください。")
         st.stop()
     
     save_char_history(st.session_state.char_description)
     
-    for idx, img_file in enumerate(uploaded_images):
+    for idx, item in enumerate(targets):
         with st.container():
-            # 1. 画像解析 (analyze_image_with_grok の役割)
-            img_b64 = process_image(img_file)
-            with st.spinner(f"画像 {idx+1} 解析中..."):
-                base_prompt = call_grok_api([
-                    {"role": "user", "content": [
-                        {"type": "text", "text": "Describe this image in precise English detail for a diffusion prompt. Paragraph format."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-                    ]}
-                ])
+            current_ctx = ""
+            display_img = None
             
-            if "ERROR" in base_prompt:
-                st.error(f"❌ 解析失敗: {base_prompt}")
+            # コンテキスト（画像解析 or テキスト）の取得
+            if item["type"] == "image":
+                img_b64 = process_image(item['content'])
+                display_img = item['content'].getvalue()
+                with st.spinner(f"画像 {idx+1} 解析中..."):
+                    current_ctx = call_grok_api([
+                        {"role": "user", "content": [
+                            {"type": "text", "text": "Describe this image context for a prompt paragraph."},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
+                        ]}
+                    ])
+            else:
+                current_ctx = item["content"]
+
+            if "ERROR" in str(current_ctx):
+                st.error(f"❌ 解析失敗: {current_ctx}")
                 continue
 
-            # 2. 合成 (merge_description_and_level の役割)
-            with st.spinner(f"プロンプト {idx+1} 合成中..."):
+            # 最終プロンプトの合成（過去の強力なロジックを反映）
+            with st.spinner(f"Result {idx+1} 合成中..."):
                 level_desc = {
-                    1: "fully clothed, modest outfit, no cleavage",
-                    2: "slight skin exposure, minimal cleavage",
-                    3: "visible cleavage, sexy outfit",
-                    4: "bikini or lingerie, highly revealing",
-                    5: "nearly nude, minimal coverage"
+                    1: "fully clothed, modest outfit, opaque fabric, no skin exposure",
+                    2: "minimal skin exposure, form-fitting",
+                    3: "visible cleavage, sexy lingerie style elements",
+                    4: "bikini or lingerie only, no outer clothing",
+                    5: "minimal coverage, nearly nude, extreme skin exposure"
                 }[sex_level]
 
-                # 過去コードの強力な指示を継承
                 strong_adds = []
-                if tight_clothing: strong_adds.append("extremely tight-fitting, skin-tight fabric")
-                if nipple_poke: strong_adds.append("visible nipple outlines poking through fabric")
+                if tight_clothing: strong_adds.append("extremely tight-fitting, skin-tight, body-hugging")
+                if nipple_poke: strong_adds.append("visible nipple outlines poking through thin fabric")
                 if mask_on: strong_adds.append("wearing a white surgical mask")
                 if iphone_selfie: strong_adds.append("holding iPhone, mirror selfie pose")
                 if face_hidden: strong_adds.append("face hidden, focus on body")
@@ -166,37 +191,36 @@ if st.button("🚀 プロンプトを一括生成", type="primary", use_containe
 
                 bust_ins = ""
                 if bust_type == "貧乳":
-                    bust_ins = "extremely flat chest, no volume, petite ribcage, (flat chest:1.9)"
+                    bust_ins = "completely flat chest, no volume, bony torso, (flat chest:1.9)"
                 elif bust_type == "豊満":
-                    bust_ins = "ample bust, voluptuous curves, large breasts"
+                    bust_ins = "large ample bust, voluptuous curves, high-volume breasts"
 
                 system_ins = (
-                    "You are an expert prompt engineer. Merge features into the scene. "
-                    f"MANDATORY: {level_desc}, {bust_ins}, {', '.join(strong_adds)}. "
-                    "Output ONLY the final English paragraph. No preamble."
+                    "You are an expert prompt engineer for Higgsfield. Merge description and scene. "
+                    f"Rules: {level_desc}, {bust_ins}, {', '.join(strong_adds)}. "
+                    "Output ONLY a single continuous English paragraph. Start with 'A young...'"
                 )
                 
                 final_p = call_grok_api([
                     {"role": "system", "content": system_ins},
-                    {"role": "user", "content": f"Base: {base_prompt}\nSubject: {st.session_state.char_description}"}
+                    {"role": "user", "content": f"Base: {current_ctx}\nSubject: {st.session_state.char_description}"}
                 ])
 
                 if "ERROR" in final_p:
                     st.error(f"❌ 合成失敗: {final_p}")
                     continue
 
-                # 3. 結果表示・履歴保存
-                st.session_state.prompt_history.append((final_p, img_file.getvalue()))
+                # 履歴保存と表示
+                st.session_state.prompt_history.append((final_p, display_img))
                 st.success(f"✅ Result {idx+1}")
-                st.image(img_file, width=250)
+                if display_img: st.image(display_img, width=250)
                 st.code(final_p)
-                st.text_area(f"Copy {idx+1}", value=final_p, key=f"cp_{idx}_{random.randint(0,999)}")
+                html(f"<button onclick=\"navigator.clipboard.writeText(`{final_p.replace('`', '\\`')}`)\">コピー</button>")
 
-# 履歴（動いていた頃のコピーボタン等のUIを維持）
+# 履歴表示セクション
 if st.session_state.prompt_history:
-    st.markdown("### 📜 生成履歴")
+    st.markdown("### 📜 最新履歴")
     for i, (h_p, h_img) in enumerate(reversed(st.session_state.prompt_history[-5:])):
         with st.expander(f"履歴 {i+1}"):
-            st.image(h_img, width=200)
+            if h_img: st.image(h_img, width=150)
             st.code(h_p)
-            html(f"<button onclick=\"navigator.clipboard.writeText(`{h_p.replace('`', '\\`')}`)\">プロンプトをコピー</button>")
