@@ -35,8 +35,8 @@ def load_app_data():
 def save_char_history(char_desc):
     if not char_desc.strip(): return
     history = load_char_history()
-    if char_desc in history: history.remove(char_desc) # 重複削除
-    history.insert(0, char_desc) # 先頭に追加
+    if char_desc in history: history.remove(char_desc)
+    history.insert(0, char_desc)
     pd.DataFrame({"char_desc": history[:100]}).to_csv(CHAR_HISTORY_FILE, index=False)
 
 def load_char_history():
@@ -78,7 +78,7 @@ def call_grok_api(messages, max_tokens=600):
         return f"Connection Error: {str(e)}"
 
 # --- UI構築 ---
-st.title("Higgsfield Prompt Gen v6.0")
+st.title("Higgsfield Prompt Gen v6.1")
 
 # 1. 特徴入力
 st.markdown("### 👩 1. 女性の身体的特徴")
@@ -88,7 +88,7 @@ selected_hist = st.selectbox("過去の履歴から選ぶ (最大100件)", ["-- 
 if selected_hist != "-- 履歴から選択 --":
     st.session_state.char_description = selected_hist
 
-char_input = st.text_area("身体的特徴を入力（自動保存）", value=st.session_state.char_description)
+char_input = st.text_area("身体的特徴を入力（自動保存）", value=st.session_state.char_description, key="char_area")
 if char_input != st.session_state.char_description:
     st.session_state.char_description = char_input
     save_app_data(char_input, st.session_state.scene_description)
@@ -97,12 +97,12 @@ st.markdown("---")
 
 # 2. シチュエーション
 st.markdown("### 🎬 2. シチュエーション")
-tab1, tab2 = st.tabs(["📷 画像解析", "🎲 AI丸投げ"])
+# ラジオボタンで明示的にモードを選択するように変更（これで混同を防ぎます）
+mode = st.radio("生成モードを選択", ["📷 画像から取得", "🎲 AI丸投げ・テキスト入力"], horizontal=True)
 
-with tab1:
+if mode == "📷 画像から取得":
     uploaded_images = st.file_uploader("参考画像", type=["jpg", "png", "heic"], accept_multiple_files=True)
-
-with tab2:
+else:
     if st.button("🎲 AIに新しいシチュエーションを提案させる"):
         with st.spinner("考案中..."):
             prompt = [{"role": "user", "content": "Suggest a realistic Japanese SNS selfie scene for a sexy influencer. Format: '場所：〇〇、服装：××、状態：△△'. Japanese, 1 line."}]
@@ -112,10 +112,10 @@ with tab2:
                 save_app_data(st.session_state.char_description, res)
                 st.rerun()
 
-scene_input = st.text_area("シチュエーション（編集可）", value=st.session_state.scene_description)
-if scene_input != st.session_state.scene_description:
-    st.session_state.scene_description = scene_input
-    save_app_data(st.session_state.char_description, scene_input)
+    scene_input = st.text_area("シチュエーション（編集可）", value=st.session_state.scene_description, key="scene_area")
+    if scene_input != st.session_state.scene_description:
+        st.session_state.scene_description = scene_input
+        save_app_data(st.session_state.char_description, scene_input)
 
 # 3. オプション
 st.markdown("---")
@@ -125,9 +125,16 @@ bust_type = c2.radio("胸のサイズ", options=["貧乳", "普通", "豊満"], 
 
 # --- 生成実行 ---
 if st.button("🚀 プロンプト生成", type="primary", use_container_width=True):
-    save_char_history(st.session_state.char_description) # 履歴に保存
+    save_char_history(st.session_state.char_description)
     
-    process_list = [{"type": "image", "file": f} for f in uploaded_images] if uploaded_images else [{"type": "text", "content": st.session_state.scene_description}]
+    # モードに応じて処理対象を厳密に切り分け
+    process_list = []
+    if mode == "📷 画像から取得" and uploaded_images:
+        for f in uploaded_images:
+            process_list.append({"type": "image", "file": f})
+    else:
+        # モードがテキスト、または画像モードなのに画像がない場合
+        process_list.append({"type": "text", "content": st.session_state.scene_description})
 
     for item in process_list:
         if item["type"] == "image":
@@ -152,9 +159,8 @@ if st.button("🚀 プロンプト生成", type="primary", use_container_width=T
             
             st.session_state.prompt_history.append({"prompt": final_p, "image": display_img})
             
-            # コピーボタン付き表示
             st.code(final_p)
-            st.button("📋 コピー (下のテキストエリアから選んでください)", key=os.urandom(8)) # ダミー。実際はtext_areaがコピーしやすい
+            st.text_area("コピー用", value=final_p, height=100, key=os.urandom(8))
 
 # --- 履歴表示 ---
 if st.session_state.prompt_history:
@@ -163,4 +169,4 @@ if st.session_state.prompt_history:
     for idx, hist in enumerate(reversed(st.session_state.prompt_history[-10:])):
         with st.expander(f"履歴 {len(st.session_state.prompt_history) - idx}"):
             if hist["image"]: st.image(hist["image"], width=150)
-            st.text_area("プロンプト (ここからコピーしてください)", value=hist["prompt"], height=100, key=f"hist_txt_{idx}")
+            st.text_area("プロンプト", value=hist["prompt"], height=100, key=f"hist_txt_{idx}")
