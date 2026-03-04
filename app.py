@@ -246,6 +246,7 @@ if description != st.session_state.current_description:
 
 if st.button("プロンプト生成"):
     if not uploaded_images:
+        generated_prompts = []
         st.warning("画像を1枚以上アップロードしてください。")
     else:
         # 実行時に現在の記述を履歴に追加
