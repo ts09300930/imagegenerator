@@ -39,7 +39,6 @@ GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
 def call_grok_api(messages):
     # 【最終確定】2026年現在、Vision対応の正式名称は 'grok-2-1212' です。
-    # もしAPI側で変更があっても、以下のエラー処理で詳細を表示します。
     payload = {
         "model": "grok-2-1212", 
         "messages": messages, 
@@ -50,14 +49,24 @@ def call_grok_api(messages):
     
     try:
         res = requests.post(GROK_API_URL, json=payload, headers=headers, timeout=60)
-        json_res = res.json()
+        
+        # レスポンスがJSON形式か安全にチェック
+        try:
+            json_res = res.json()
+        except Exception:
+            return f"API_ERROR_{res.status_code}: Response is not JSON. {res.text[:100]}"
+
         if res.status_code == 200:
             return json_res["choices"][0]["message"]["content"].strip()
         else:
-            # 安全にエラーメッセージを抽出
-            msg = json_res.get('error', {}).get('message', 'Unknown API Error')
+            # json_resが辞書であることを確認してからgetを使用（エラーの核心部分を修正）
+            if isinstance(json_res, dict):
+                msg = json_res.get('error', {}).get('message', 'Unknown API Error')
+            else:
+                msg = str(json_res)
             return f"API_ERROR_{res.status_code}: {msg}"
     except Exception as e:
+        # e(例外オブジェクト)を直接操作せず、文字列として返す
         return f"CONNECTION_ERROR: {str(e)}"
 
 def process_image(uploaded_file):
@@ -171,7 +180,7 @@ if st.button("🚀 プロンプトを一括生成", type="primary", use_containe
 
                 final_p = call_grok_api([{"role":"user","content": f"{instruction} Output ONLY the English prompt starting with 'A photorealistic shot of...'"}])
                 
-                if "API_ERROR" in final_p:
+                if "API_ERROR" in final_p or "CONNECTION_ERROR" in final_p:
                     st.error(f"❌ 合成失敗 {i+1}: {final_p}")
                     continue
 
