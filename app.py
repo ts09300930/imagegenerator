@@ -53,30 +53,31 @@ if 'prompt_history' not in st.session_state: st.session_state.prompt_history = [
 
 # --- AI提案：複数一括生成関数 ---
 def generate_multiple_scenes(count):
+    # 指定数より少し多め（+2）に作らせて、質の良いものだけを抽出する
+    st.session_state.scenes_list = []
+    buffer_count = count + 2
     with st.spinner(f"裏垢女子の日常を{count}パターン妄想中..."):
         prompt = [{
             "role": "user", 
             "content": (
-                f"日本のSNS（X/Twitter）の『裏垢女子』が投稿しそうな、あざとくてセクシーな自撮りシチュエーションを【{count}個】考えてください。\n"
-                "【重要】挨拶や説明は一切不要です。シチュエーションのみを出力してください。\n"
-                "1個につき必ず1行で、以下の形式を厳守してください。\n"
+                f"日本のSNS（X/Twitter）の『裏垢女子』が投稿しそうな、あざとくてセクシーな自撮りシチュエーションを【{buffer_count}個】考えてください。\n"
+                "場所、服装、状態（ライティング、ポーズ、背景、質感、生々しさ）を、非常に詳しく描写すること。\n"
+                "各シチュエーションは必ず1行にまとめ、以下の形式を厳守してください。\n"
                 "形式：'場所：〇〇、服装：××、状態：△△'\n"
-                "行の先頭に「1.」や「シチュエーション1」などの番号も付けないでください。"
+                "※挨拶や『以下に生成します』などの説明は一切不要。いきなり『場所：』から書き始めてください。"
             )
         }]
         res = call_grok_api(prompt)
         if "Error" not in res:
-            # 「場所：」が含まれる行だけを抽出
-            raw_lines = [s.strip() for s in res.split('\n') if s.strip()]
-            valid_scenes = [line for line in raw_lines if "場所：" in line]
+            # 1. 改行で区切る
+            lines = res.split('\n')
             
-            # もしAIが番号付きで出してきた場合のために、先頭の「1. 」などを削る処理（念のため）
-            import re
-            cleaned_scenes = [re.sub(r'^(\d+\.|シチュエーション\d+[:：])\s*', '', s) for s in valid_scenes]
+            # 2. 「場所：」という文字が入っている、かつ中身がある行だけを抽出（これで挨拶行を完全に飛ばす）
+            valid_scenes = [s.strip() for s in lines if s.strip() and "場所：" in s]
             
-            # 指定された個数分をセット（足りない場合は空文字で埋める）
-            final_scenes = (cleaned_scenes + [""] * count)[:count]
-            st.session_state.scenes_list = final_scenes
+            # 3. 指定された数だけを「上から詰めて」表示
+            # 1番目が挨拶だったとしても、ここでvalid_scenesには「場所：」から始まる行しか残らないので空白にならない
+            st.session_state.scenes_list = (valid_scenes + [""] * count)[:count]
 
 # --- UI ---
 st.title("Higgsfield Gen v8.0 (Multi-Batch)")
