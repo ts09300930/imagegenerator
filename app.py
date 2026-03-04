@@ -58,17 +58,25 @@ def generate_multiple_scenes(count):
             "role": "user", 
             "content": (
                 f"日本のSNS（X/Twitter）の『裏垢女子』が投稿しそうな、あざとくてセクシーな自撮りシチュエーションを【{count}個】考えてください。\n"
-                "1個ずつ、場所、服装、状態（ライティング、ポーズ、背景、質感、生々しさ）を非常に詳しく描写すること。\n"
-                "各シチュエーションは必ず1行にまとめ、以下の形式を厳守してください。\n"
+                "【重要】挨拶や説明は一切不要です。シチュエーションのみを出力してください。\n"
+                "1個につき必ず1行で、以下の形式を厳守してください。\n"
                 "形式：'場所：〇〇、服装：××、状態：△△'\n"
-                "※箇条書きなどは不要、1行に1つのシチュエーションを書いてください。"
+                "行の先頭に「1.」や「シチュエーション1」などの番号も付けないでください。"
             )
         }]
         res = call_grok_api(prompt)
         if "Error" not in res:
-            # 改行で分割してリスト化
-            new_scenes = [s.strip() for s in res.split('\n') if s.strip() and "場所：" in s]
-            st.session_state.scenes_list = new_scenes[:count]
+            # 「場所：」が含まれる行だけを抽出
+            raw_lines = [s.strip() for s in res.split('\n') if s.strip()]
+            valid_scenes = [line for line in raw_lines if "場所：" in line]
+            
+            # もしAIが番号付きで出してきた場合のために、先頭の「1. 」などを削る処理（念のため）
+            import re
+            cleaned_scenes = [re.sub(r'^(\d+\.|シチュエーション\d+[:：])\s*', '', s) for s in valid_scenes]
+            
+            # 指定された個数分をセット（足りない場合は空文字で埋める）
+            final_scenes = (cleaned_scenes + [""] * count)[:count]
+            st.session_state.scenes_list = final_scenes
 
 # --- UI ---
 st.title("Higgsfield Gen v8.0 (Multi-Batch)")
