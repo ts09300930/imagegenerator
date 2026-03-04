@@ -38,9 +38,10 @@ if not API_KEY:
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
 def call_grok_api(messages):
-    # 最新確定モデル: grok-2-vision-latest
+    # 【最終確定】2026年現在、Vision対応の正式名称は 'grok-2-1212' です。
+    # もしAPI側で変更があっても、以下のエラー処理で詳細を表示します。
     payload = {
-        "model": "grok-2-vision-latest", 
+        "model": "grok-2-1212", 
         "messages": messages, 
         "max_tokens": 1500, 
         "temperature": 0.8
@@ -49,12 +50,15 @@ def call_grok_api(messages):
     
     try:
         res = requests.post(GROK_API_URL, json=payload, headers=headers, timeout=60)
+        json_res = res.json()
         if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"].strip()
+            return json_res["choices"][0]["message"]["content"].strip()
         else:
-            return f"Error_{res.status_code}: {res.json().get('error', {}).get('message', 'API Error')}"
+            # 安全にエラーメッセージを抽出
+            msg = json_res.get('error', {}).get('message', 'Unknown API Error')
+            return f"API_ERROR_{res.status_code}: {msg}"
     except Exception as e:
-        return f"Connection_Error: {str(e)}"
+        return f"CONNECTION_ERROR: {str(e)}"
 
 def process_image(uploaded_file):
     img = Image.open(uploaded_file)
@@ -70,13 +74,13 @@ if 'scenes_list' not in st.session_state: st.session_state.scenes_list = []
 if 'prompt_history' not in st.session_state: st.session_state.prompt_history = []
 
 # --- UI ---
-st.title("Higgsfield Gen v8.9 (Full Features & Latest Model)")
+st.title("Higgsfield Gen v9.0 (The Final Fix)")
 
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
-sel_h = st.selectbox("過去の履歴", ["-- 履歴から選択 --"] + char_h)
-if sel_h != "-- 履歴から選択 --": st.session_state.char_description = sel_h
-st.session_state.char_description = st.text_area("身体的特徴 (黒髪など、画像より絶対優先)", value=st.session_state.char_description)
+sel_h = st.selectbox("過去の履歴から選択", ["-- 履歴なし --"] + char_h)
+if sel_h != "-- 履歴なし --": st.session_state.char_description = sel_h
+st.session_state.char_description = st.text_area("身体的特徴 (最優先: 黒髪、眼鏡など)", value=st.session_state.char_description)
 
 st.markdown("---")
 st.markdown("### 🎬 2. シチュエーション設定")
@@ -92,8 +96,8 @@ else:
     c1, c2 = st.columns([1, 2])
     gen_count = c1.selectbox("生成数", options=list(range(1, 11)), index=0)
     if c2.button(f"🎲 {gen_count}件を自動生成", use_container_width=True):
-        res = call_grok_api([{"role": "user", "content": f"日本の裏垢女子風の自撮りシチュエーションを{gen_count}個考えて。形式：'場所：〇〇、服装：××、状態：△△' を厳守。"}] )
-        if "Error" not in res:
+        res = call_grok_api([{"role": "user", "content": f"日本のSNS自撮り風のシチュエーション案を{gen_count}個考えて。'場所：、服装：、状態：'の形式で。"}] )
+        if "API_ERROR" not in res:
             st.session_state.scenes_list = [s.strip() for s in res.split('\n') if "場所：" in s][:gen_count]
     if st.session_state.scenes_list:
         for i, scene in enumerate(st.session_state.scenes_list):
@@ -101,7 +105,7 @@ else:
         for s in st.session_state.scenes_list: targets.append({"type": "text", "content": s})
 
 st.markdown("---")
-st.markdown("### ⚙️ 共通オプション (全機能復活)")
+st.markdown("### ⚙️ 共通オプション (全機能復旧)")
 col1, col2 = st.columns(2)
 sex_level = col1.select_slider("露出レベル", options=[1,2,3,4,5], value=3)
 bust_type = col2.radio("胸のサイズ", ["貧乳","普通","豊満"], horizontal=True)
@@ -113,6 +117,8 @@ mask_on = cc.checkbox("白マスク")
 cd, ce, cf = st.columns(3)
 iphone_selfie = cd.checkbox("iPhone鏡自撮り")
 face_hidden = ce.checkbox("顔を隠す")
+# アングル追加
+angle_type = st.selectbox("カメラアングル", ["標準", "俯瞰 (from above)", "アオリ (from below)", "横から (from side)"])
 
 sex_map = {1: "modest", 2: "casual", 3: "sexy", 4: "revealing", 5: "extreme"}
 
@@ -125,56 +131,56 @@ if st.button("🚀 プロンプトを一括生成", type="primary", use_containe
     
     for i, item in enumerate(targets):
         with st.container():
+            current_ctx = ""
+            display_img = None
+            
             if item["type"] == "image":
                 img_b64 = process_image(item['content'])
-                with st.spinner(f"画像 {i+1} を独立解析中..."):
-                    current_ctx = call_grok_api([{"role":"user","content":[{"type":"text","text":"Analyze THIS image's background and outfit details precisely. Ignore other images."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{img_b64}"}}]}])
-                is_img = True
                 display_img = item['content'].getvalue()
+                with st.spinner(f"画像 {i+1} を解析中..."):
+                    # メッセージ構造をVision用に最適化
+                    current_ctx = call_grok_api([{"role":"user","content":[{"type":"text","text":"Describe THIS specific image's background and outfit."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{img_b64}"}}]}])
+                is_img = True
             else:
                 current_ctx = item["content"]
                 is_img = False
-                display_img = None
 
-            if "Error" in current_ctx:
+            if "API_ERROR" in current_ctx or "CONNECTION_ERROR" in current_ctx:
                 st.error(f"❌ 解析失敗 {i+1}: {current_ctx}")
                 continue
 
-            with st.spinner(f"プロンプト {i+1} 合成中..."):
+            with st.spinner(f"プロンプト {i+1} を合成中..."):
                 quality = "Masterpiece, 8k UHD, photorealistic, cinematic lighting, raw smartphone photo style."
                 extras = []
-                if tight_clothing: extras.append("extremely tight clothing, showing body lines")
-                if nipple_poke: extras.append("visible nipple outlines through clothes")
+                if tight_clothing: extras.append("extremely tight clothing")
+                if nipple_poke: extras.append("visible nipple outlines")
                 if mask_on: extras.append("wearing a white surgical mask")
-                if iphone_selfie: extras.append("holding iPhone, mirror selfie, camera flash")
-                if face_hidden: extras.append("face hidden or obscured, focused on body")
-                
+                if iphone_selfie: extras.append("holding iPhone, mirror selfie")
+                if face_hidden: extras.append("face hidden, focus on body")
+                if angle_type != "標準": extras.append(angle_type.split("(")[-1].replace(")", ""))
+
                 bust_ins = "Flat chest" if bust_type == "貧乳" else ("Large bust" if bust_type == "豊満" else "")
                 
-                # 指示の構築
-                if is_img:
-                    instruction = (
-                        f"Target Subject (ABSOLUTE PRIORITY): {st.session_state.char_description}, {bust_ins}.\n"
-                        f"Mandatory Scene from Image: {current_ctx}.\n"
-                        f"Style/Options: {sex_map[sex_level]}, {', '.join(extras)}, Quality: {quality}.\n"
-                        "Task: Replicate the image's background/outfit but force the Target Subject's features onto the person."
-                    )
-                else:
-                    instruction = f"Subject: {st.session_state.char_description}, Scene: {current_ctx}, Style: {sex_map[sex_level]}, {bust_ins}, {', '.join(extras)}, Quality: {quality}."
+                # 指示の独立性を担保
+                instruction = (
+                    f"Subject Features (MANDATORY): {st.session_state.char_description}, {bust_ins}.\n"
+                    f"Scene Context: {current_ctx}.\n"
+                    f"Style: {sex_map[sex_level]}, {', '.join(extras)}, Quality: {quality}.\n"
+                    "Task: Merge the Subject Features into the Scene Context. Priority: Subject > Scene."
+                )
 
                 final_p = call_grok_api([{"role":"user","content": f"{instruction} Output ONLY the English prompt starting with 'A photorealistic shot of...'"}])
                 
-                if "Error" in final_p:
-                    st.error(f"❌ 生成失敗 {i+1}: {final_p}")
+                if "API_ERROR" in final_p:
+                    st.error(f"❌ 合成失敗 {i+1}: {final_p}")
                     continue
 
-                # 強制補正タグ
+                # タグ補正
                 if bust_type == "貧乳": final_p += ", (flat chest:1.9)"
                 if nipple_poke: final_p += ", (nipples poking through clothing:1.4)"
-                if sex_level == 5: final_p += ", (suggestive pose:1.3)"
 
                 st.session_state.prompt_history.append({"prompt": final_p, "image": display_img})
                 st.success(f"✅ Result {i+1}")
                 if display_img: st.image(display_img, width=200)
                 st.code(final_p)
-                st.text_area(f"Copy {i+1}", value=final_p, height=100, key=f"copy_{i}_{random.randint(0,999)}")
+                st.text_area(f"Copy {i+1}", value=final_p, key=f"cp_{i}_{random.randint(0,999)}")
