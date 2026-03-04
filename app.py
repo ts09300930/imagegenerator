@@ -14,8 +14,8 @@ register_heif_opener()
 # --- 保存・履歴設定 ---
 DATA_DIR = "data"
 if not os.path.exists(DATA_DIR): os.makedirs(DATA_DIR)
-SAVE_FILE = os.path.join(DATA_DIR, "app_state_v7.csv")
-CHAR_HISTORY_FILE = os.path.join(DATA_DIR, "char_history_v7.csv")
+SAVE_FILE = os.path.join(DATA_DIR, "app_state_v7_5.csv")
+CHAR_HISTORY_FILE = os.path.join(DATA_DIR, "char_history_v7_5.csv")
 
 def save_app_data(char, scene): 
     pd.DataFrame({"char_desc": [char], "scene_desc": [scene]}).to_csv(SAVE_FILE, index=False)
@@ -51,6 +51,7 @@ if not API_KEY:
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
 def call_grok_api(messages):
+    # temperatureを0.9に設定し、AIの「遊び」を確保
     payload = {"model": "grok-4", "messages": messages, "max_tokens": 800, "temperature": 0.9}
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     try:
@@ -58,23 +59,17 @@ def call_grok_api(messages):
         return res.json()["choices"][0]["message"]["content"].strip() if res.status_code == 200 else f"Error: {res.status_code}"
     except: return "Connection Error"
 
-# --- 修正ポイント：AI提案を「関数」の中に正しく入れる ---
+# --- AI提案：リスト無しの完全丸投げ ---
 def update_scene_suggestion():
-    with st.spinner("日常に潜むエロスを構成中..."):
+    with st.spinner("裏垢女子の日常を妄想中..."):
         prompt = [{
             "role": "user", 
             "content": (
-                "Create an incredibly detailed 'Ura-aka' (hidden SNS) style selfie scene. "
-                "CRITICAL: Do not always choose a hotel or lingerie. "
-                "Randomly pick ONE category for the location: "
-                "1. [Daily]: Kitchen, cluttered bedroom, laundry room, bathroom mirror. "
-                "2. [Public/Risky]: Fitting room, elevator, cinema seat, quiet library corner, train seat. "
-                "3. [Outdoor/Night]: Night pool, car interior at gas station, park at night, balcony. "
-                "4. [Trendy]: Stylish cafe, luxury gym, parking lot, rooftop. "
-                "Describe exact lighting (smartphone flash, neon, sunset), "
-                "texture of clothing (sheer lace, tight yoga pants, oversized hoodie), "
-                "and a suggestive pose that feels like a real SNS post. "
-                "Format: '場所：〇〇、服装：××、状態：△△'. Japanese, 1 line only."
+                "You are a trendy Japanese 'Ura-aka' influencer. "
+                "Think of ONE random, realistic, and suggestive selfie situation. "
+                "NO LISTS. NO CLICHES. Think of private moments, risky outdoor spots, or mundane home settings that feel erotic. "
+                "Describe the lighting (flash, neon, morning sun), textures, and the raw atmosphere. "
+                "Format: '場所：〇〇、服装：××、状態：△△'. Output Japanese, 1 line only."
             )
         }]
         res = call_grok_api(prompt)
@@ -90,7 +85,7 @@ if 'scene_description' not in st.session_state: st.session_state.scene_descripti
 if 'prompt_history' not in st.session_state: st.session_state.prompt_history = []
 
 # --- UI ---
-st.title("Higgsfield Gen v7.4")
+st.title("Higgsfield Prompt Gen v7.5")
 
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
@@ -111,7 +106,6 @@ mode = st.radio("生成モード", ["📷 画像解析", "🎲 AIに丸投げ"],
 if mode == "📷 画像解析":
     uploaded_images = st.file_uploader("画像アップロード", type=["jpg","png","heic"], accept_multiple_files=True)
 else:
-    # 🎲ボタン：関数を呼び出す
     st.button("🎲 裏垢女子っぽいシーンを提案させる", on_click=update_scene_suggestion)
     
     if "scene_area_widget" not in st.session_state:
@@ -153,17 +147,17 @@ if st.button("🚀 プロンプトを一括生成", type="primary", use_containe
     for i, item in enumerate(tasks):
         with st.container():
             if item["type"] == "image":
-                with st.spinner(f"画像{i+1}解析中..."):
+                with st.spinner(f"解析中..."):
                     st.image(item['file'], width=200)
                     b64 = base64.b64encode(item['file'].getvalue()).decode('utf-8')
-                    context = call_grok_api([{"role":"user","content":[{"type":"text","text":"Describe clothing and environment."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
+                    context = call_grok_api([{"role":"user","content":[{"type":"text","text":"Describe details."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
                     display_img = item['file'].getvalue()
             else:
                 context = item["content"]
                 display_img = None
 
             with st.spinner(f"合成中..."):
-                quality = "Masterpiece, 8k UHD, photorealistic, cinematic lighting."
+                quality = "Masterpiece, 8k UHD, photorealistic, cinematic lighting, raw smartphone photo style."
                 sex_text = sex_map[sex_level]
                 extras = []
                 if tight_clothing: extras.append("extremely tight clothing")
