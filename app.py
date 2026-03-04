@@ -64,11 +64,20 @@ c_init, s_init = load_app_data()
 if 'char_description' not in st.session_state: st.session_state.char_description = c_init
 if 'scene_description' not in st.session_state: st.session_state.scene_description = s_init
 if 'prompt_history' not in st.session_state: st.session_state.prompt_history = []
-# AI提案時にテキストエリアを強制更新するためのカウンター
-if 'scene_counter' not in st.session_state: st.session_state.scene_counter = 0
+
+# ★【解決の鍵】AI提案を即座に反映させるためのコールバック
+def update_scene_suggestion():
+    with st.spinner("AI提案中..."):
+        prompt = [{"role":"user","content":"Suggest a sexy Japanese SNS selfie scene. Format: '場所：〇〇、服装：××、状態：△△'. Japanese, 1 line."}]
+        res = call_grok_api(prompt)
+        if "Error" not in res:
+            # 直接 session_state を上書きする。このキーはウィジェットの key と一致させる
+            st.session_state.scene_area_widget = res
+            st.session_state.scene_description = res
+            save_app_data(st.session_state.char_description, res)
 
 # --- UI構築 ---
-st.title("Higgsfield Prompt Gen v6.5")
+st.title("Higgsfield Prompt Gen v6.6")
 
 # 1. 特徴入力
 st.markdown("### 👩 1. 女性の身体的特徴")
@@ -91,17 +100,16 @@ mode = st.radio("生成モード", ["📷 画像から取得", "🎲 AI丸投げ
 if mode == "📷 画像から取得":
     uploaded_images = st.file_uploader("参考画像(複数可)", type=["jpg","png","heic"], accept_multiple_files=True)
 else:
-    if st.button("🎲 AIに新しいシチュエーションを提案させる"):
-        with st.spinner("考案中..."):
-            res = call_grok_api([{"role":"user","content":"Suggest a sexy Japanese SNS selfie scene. Format: '場所：〇〇、服装：××、状態：△△'. Japanese, 1 line."}])
-            if "Error" not in res:
-                st.session_state.scene_description = res
-                st.session_state.scene_counter += 1  # Keyを更新して再描画を強制
-                save_app_data(st.session_state.char_description, res)
-                st.rerun()
+    # ★ 修正ポイント：on_clickを使用して強制的に値を流し込む
+    st.button("🎲 AIに新しいシチュエーションを提案させる", on_click=update_scene_suggestion)
 
-    # ★修正の核心：keyにカウンターを含めることで、AI提案時にテキストエリアを強制リセット
-    scene_input = st.text_area("シチュエーション内容", value=st.session_state.scene_description, key=f"scene_area_{st.session_state.scene_counter}")
+    # ★ ウィジェットの値を session_state.scene_area_widget と同期
+    if "scene_area_widget" not in st.session_state:
+        st.session_state.scene_area_widget = st.session_state.scene_description
+
+    scene_input = st.text_area("シチュエーション内容", key="scene_area_widget")
+    
+    # 変更があれば保存
     if scene_input != st.session_state.scene_description:
         st.session_state.scene_description = scene_input
         save_app_data(st.session_state.char_description, scene_input)
@@ -135,6 +143,7 @@ if st.button("🚀 プロンプトを一括生成", type="primary", use_containe
     save_char_history(st.session_state.char_description)
     
     tasks = []
+    # 現在のモードに応じてタスクを作成
     if mode == "📷 画像から取得" and uploaded_images:
         tasks = [{"type": "image", "file": f} for f in uploaded_images]
     else:
