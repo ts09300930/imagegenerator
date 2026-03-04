@@ -7,6 +7,7 @@ from pillow_heif import register_heif_opener
 import io
 from PIL import Image
 import random
+import time
 
 # HEICサポート
 register_heif_opener()
@@ -39,12 +40,33 @@ if not API_KEY:
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
 def call_grok_api(messages):
-    payload = {"model": "grok-4", "messages": messages, "max_tokens": 1500, "temperature": 0.9}
+    # モデル名を安定版に変更（grok-4は未リリースのため503の原因になる可能性大）
+    payload = {"model": "grok-2-vision-1212", "messages": messages, "max_tokens": 1500, "temperature": 0.9}
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    try:
-        res = requests.post(GROK_API_URL, json=payload, headers=headers, timeout=60)
-        return res.json()["choices"][0]["message"]["content"].strip() if res.status_code == 200 else f"Error: {res.status_code}"
-    except: return "Connection Error"
+    
+    for attempt in range(3):  # 503対策のリトライ処理
+        try:
+            res = requests.post(GROK_API_URL, json=payload, headers=headers, timeout=60)
+            if res.status_code == 200:
+                return res.json()["choices"][0]["message"]["content"].strip()
+            elif res.status_code == 503:
+                time.sleep(3)  # 3秒待機してリトライ
+                continue
+            else:
+                return f"Error: {res.status_code} - {res.text}"
+        except Exception as e:
+            if attempt == 2: return f"Connection Error: {str(e)}"
+            time.sleep(3)
+    return "Service Unavailable after retries"
+
+def process_image(uploaded_file):
+    """画像を解析用に最適化（リサイズ）する"""
+    img = Image.open(uploaded_file)
+    # 最大1024pxにリサイズして負荷軽減
+    img.thumbnail((1024, 1024))
+    buffered = io.BytesIO()
+    img.save(buffered, format="JPEG", quality=85)
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 # --- 状態初期化 ---
 if 'char_description' not in st.session_state: st.session_state.char_description = ""
@@ -69,16 +91,16 @@ def generate_multiple_scenes(count):
             st.session_state.scenes_list = valid_scenes[:count]
 
 # --- UI ---
-st.title("Higgsfield Gen v8.4 (Strict Independence)")
+st.title("Higgsfield Gen v8.5 (Stability Fix)")
 
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
 sel_h = st.selectbox("過去の履歴", ["-- 履歴から選択 --"] + char_h)
 if sel_h != "-- 履歴から選択 --": st.session_state.char_description = sel_h
-st.session_state.char_description = st.text_area("身体的特徴 (これが画像解析より最優先されます)", value=st.session_state.char_description)
+st.session_state.char_description = st.text_area("身体的特徴 (最優先事項)", value=st.session_state.char_description)
 
 st.markdown("---")
-st.markdown("### 🎬 2. シチューション設定")
+st.markdown("### 🎬 2. シチュエーション設定")
 mode = st.radio("入力モードを選択", ["📷 画像解析（アップロード）", "🎲 AI自動生成（テキスト）"], horizontal=True)
 
 targets = []
@@ -125,7 +147,6 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
     save_char_history(st.session_state.char_description)
     
     for i, item in enumerate(targets):
-        # 各ループでコンテキストを完全にリセット
         current_image_context = "" 
         display_img = None
         is_image_mode = False
@@ -135,23 +156,24 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
                 is_image_mode = True
                 display_img = item['content'].getvalue()
                 with st.spinner(f"画像 {i+1} を単独解析中..."):
-                    b64 = base64.b64encode(display_img).decode('utf-8')
-                    # 他の画像の影響を受けないよう、この画像だけの情報を抽出
+                    b64_data = process_image(item['content']) # リサイズ処理
                     analysis_prompt = (
-                        "Describe THIS specific image ONLY. Do not refer to any previous images.\n"
-                        "1. BACKGROUND: Describe the exact setting (e.g., stone bench, concrete wall, park greenery).\n"
-                        "2. OUTFIT: Exact details of the clothes in THIS image (e.g., blue stripes, specific fabric).\n"
-                        "3. ATMOSPHERE: Lighting and camera angle of THIS image."
+                        "Analyze THIS image independently. Focus on:\n"
+                        "1. BACKGROUND: Exact environment (bench, wall, trees, etc.).\n"
+                        "2. OUTFIT: Exact details (colors, patterns, fabric).\n"
+                        "3. LIGHTING/ANGLE: Camera position and light."
                     )
-                    # messagesを毎回新しく作成して、前の画像履歴が混ざらないようにする
-                    current_image_context = call_grok_api([{"role":"user","content":[{"type":"text","text":analysis_prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
+                    current_image_context = call_grok_api([{"role":"user","content":[{"type":"text","text":analysis_prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64_data}"}}]}])
             else:
                 current_image_context = item["content"]
                 is_image_mode = False
 
+            if "Error" in current_image_context:
+                st.error(f"解析失敗 {i+1}: {current_image_context}")
+                continue
+
             with st.spinner(f"プロンプト {i+1} を独立合成中..."):
                 quality = "Masterpiece, 8k UHD, photorealistic, cinematic lighting, raw smartphone photo style."
-                
                 extras = []
                 if tight_clothing: extras.append("extremely tight clothing")
                 if nipple_poke: extras.append("visible nipple outlines")
@@ -161,13 +183,11 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
                 bust_ins = "Flat chest" if bust_type == "貧乳" else ("Large bust" if bust_type == "豊満" else "")
 
                 if is_image_mode:
-                    # 身体的特徴(Subject)を最優先しつつ、背景・服装を「この画像のものだけ」に限定
                     instruction_content = (
-                        f"Create a prompt based SOLELY on the following details. Discard any previous image information.\n"
-                        f"Target Person Features (HIGHEST PRIORITY): {st.session_state.char_description}, {bust_ins}.\n"
-                        f"Mandatory Background & Outfit from THIS image: {current_image_context}.\n"
-                        f"Additional Tags: {', '.join(extras)}, Quality: {quality}.\n"
-                        "Constraint: The output must strictly combine the 'Target Person Features' with the 'Mandatory Background & Outfit' of THIS image only."
+                        f"Features (ABSOLUTE PRIORITY): {st.session_state.char_description}, {bust_ins}.\n"
+                        f"Environment/Outfit from image: {current_image_context}.\n"
+                        f"Add: {', '.join(extras)}, Quality: {quality}.\n"
+                        "Task: Replicate the environment/outfit from the image but force the 'Features' on the person."
                     )
                 else:
                     instruction_content = (
@@ -175,13 +195,8 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
                         f"Style: {sex_map[sex_level]}, Body: {bust_ins}, Extras: {', '.join(extras)}, Quality: {quality}."
                     )
 
-                # API呼び出しも毎回「独立した1回きりの命令」として扱う
                 final_p = call_grok_api([{"role":"user","content": f"{instruction_content} Output ONLY the English prompt starting with 'A photorealistic shot of...'"}])
                 
-                # 強制補正タグ
-                if not is_image_mode:
-                    if sex_level == 5: final_p += ", (nude:1.5)"
-                    if sex_level == 1: final_p += ", (fully clothed:1.5)"
                 if bust_type == "貧乳": final_p += ", (flat chest:1.9)"
                 if nipple_poke: final_p += ", (nipples poking through clothing:1.4)"
                 
@@ -190,12 +205,3 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
                 if display_img: st.image(display_img, width=200)
                 st.code(final_p)
                 st.text_area(f"Copy {i+1}", value=final_p, height=100, key=f"copy_{i}_{random.randint(0,99999)}")
-
-# --- 履歴 ---
-if st.session_state.prompt_history:
-    st.markdown("---")
-    st.markdown("### 🕒 生成履歴（最新10件）")
-    for idx, hist in enumerate(reversed(st.session_state.prompt_history[-10:])):
-        with st.expander(f"履歴 {len(st.session_state.prompt_history) - idx}"):
-            if hist["image"]: st.image(hist["image"], width=150)
-            st.text_area("プロンプト", value=hist["prompt"], height=100, key=f"hist_txt_{idx}")
