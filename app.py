@@ -48,20 +48,18 @@ def call_grok_api(messages):
 
 # --- 状態初期化 ---
 if 'char_description' not in st.session_state: st.session_state.char_description = ""
-if 'scenes_list' not in st.session_state: st.session_state.scenes_list = [] # 最初は空に
+if 'scenes_list' not in st.session_state: st.session_state.scenes_list = []
 if 'prompt_history' not in st.session_state: st.session_state.prompt_history = []
 
 # --- AI提案：複数一括生成関数 ---
 def generate_multiple_scenes(count):
     buffer_count = count + 2
-    with st.spinner(f"裏垢女子の日常を{count}パターン妄想中..."):
+    with st.spinner(f"シチュエーションを{count}パターン生成中..."):
         prompt = [{
             "role": "user", 
             "content": (
-                f"日本のSNS（X/Twitter）の『裏垢女子』が投稿しそうな、あざとくてセクシーな自撮りシチュエーションを【{buffer_count}個】考えてください。\n"
-                "場所、服装、状態（ライティング、ポーズ、背景、質感、生々しさ）を、非常に詳しく描写すること。\n"
-                "各シチュエーションは必ず1行にまとめ、形式：'場所：〇〇、服装：××、状態：△△' を厳守。\n"
-                "※説明や挨拶、番号、空行は一切不要。必ず『場所：』から書き始めること。"
+                f"日本のSNSで人気の『裏垢女子』風シチュエーションを【{buffer_count}個】作成してください。\n"
+                "形式：'場所：〇〇、服装：××、状態：△△'。挨拶抜き、1行ずつ。"
             )
         }]
         res = call_grok_api(prompt)
@@ -71,7 +69,7 @@ def generate_multiple_scenes(count):
             st.session_state.scenes_list = valid_scenes[:count]
 
 # --- UI ---
-st.title("Higgsfield Gen v8.2 (Logic Fix)")
+st.title("Higgsfield Gen v8.4 (Level 1-5 Strict Control)")
 
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
@@ -85,7 +83,6 @@ st.markdown("---")
 st.markdown("### 🎬 2. シチュエーション設定")
 mode = st.radio("入力モードを選択", ["📷 画像解析（アップロード）", "🎲 AI自動生成（テキスト）"], horizontal=True)
 
-# 重要な修正：モードごとにターゲットを完全に分ける
 targets = []
 
 if mode == "📷 画像解析（アップロード）":
@@ -100,10 +97,8 @@ else:
         generate_multiple_scenes(gen_count)
     
     if st.session_state.scenes_list:
-        st.markdown(f"**現在の候補: {len(st.session_state.scenes_list)} 件**")
         new_scenes = []
         for i, scene in enumerate(st.session_state.scenes_list):
-            # 1番目が空欄にならないよう、一意のkeyを与える
             s_val = st.text_area(f"シチュエーション {i+1}", value=scene, key=f"txt_{i}_{hash(scene)}")
             new_scenes.append(s_val)
         st.session_state.scenes_list = new_scenes
@@ -114,7 +109,14 @@ else:
 st.markdown("---")
 st.markdown("### ⚙️ 共通オプション")
 col1, col2 = st.columns(2)
-sex_level = col1.select_slider("露出レベル", options=[1,2,3,4,5], value=3)
+
+# --- 露出レベル定義の強化 ---
+sex_level = col1.select_slider(
+    "露出レベル", 
+    options=[1, 2, 3, 4, 5], 
+    value=3,
+    help="1:完全露出なし, 2:日常的, 3:セクシー, 4:過激, 5:全裸・ヌード"
+)
 bust_type = col2.radio("胸のサイズ", ["貧乳","普通","豊満"], horizontal=True)
 
 ca, cb, cc = st.columns(3)
@@ -126,34 +128,36 @@ cd, ce, cf = st.columns(3)
 iphone_selfie = cd.checkbox("iPhone鏡自撮り")
 face_hidden = ce.checkbox("顔を隠す")
 
-sex_map = {1: "modest", 2: "casual", 3: "sexy", 4: "revealing", 5: "extreme"}
-
 # --- 生成実行 ---
 if st.button("🚀 全てのプロンプトを一括生成", type="primary", use_container_width=True):
     if not targets:
         st.warning("画像アップロードか、AI生成を行ってください。")
         st.stop()
-        
+    
     save_char_history(st.session_state.char_description)
     
     for i, item in enumerate(targets):
         with st.container():
-            # コンテキスト（説明文）の取得
             if item["type"] == "image":
                 with st.spinner(f"画像 {i+1} 解析中..."):
                     b64 = base64.b64encode(item['content'].getvalue()).decode('utf-8')
-                    # 画像解析用のプロンプトをシンプルに
-                    res_context = call_grok_api([{"role":"user","content":[{"type":"text","text":"Describe this girl's location, outfit, and pose in detail for an image prompt."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
-                    context = res_context
+                    context = call_grok_api([{"role":"user","content":[{"type":"text","text":"Describe this girl's location, clothes and pose."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
                     display_img = item['content'].getvalue()
             else:
                 context = item["content"]
                 display_img = None
 
-            # プロンプト合成
             with st.spinner(f"プロンプト {i+1} 合成中..."):
-                quality = "Masterpiece, 8k UHD, photorealistic, cinematic lighting, raw smartphone photo style."
-                sex_text = sex_map[sex_level]
+                # --- レベルに応じた最強の命令セット ---
+                level_configs = {
+                    1: "NO skin exposure. Fully clothed, modest, innocent, everyday life shot. NO sexy elements. (highneck, long sleeves, jeans, etc.)",
+                    2: "Natural and casual. Standard everyday outfit. Very little skin showing. (T-shirt, skirt, casual dress.)",
+                    3: "Sexy and attractive. Some skin exposure. Flirty atmosphere. (mini skirt, cleavage, off-shoulder.)",
+                    4: "Very revealing and provocative. High skin exposure. Erotic mood. (lingerie, bikini, very short clothes.)",
+                    5: "Full nudity, naked, nude, uncensored skin. No clothes. (full body nude, masterpiece skin texture.)"
+                }
+                
+                style_instruction = level_configs[sex_level]
                 
                 extras = []
                 if tight_clothing: extras.append("extremely tight clothing")
@@ -164,24 +168,27 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
                 
                 bust_ins = "Flat chest" if bust_type == "貧乳" else ("Large bust" if bust_type == "豊満" else "")
 
+                # 命令文の構築
                 final_instruction = (
-                    f"Subject: {st.session_state.char_description}, "
-                    f"Context: {context}, "
-                    f"Style: {sex_text}, Body: {bust_ins}, "
-                    f"Extras: {', '.join(extras)}, "
-                    f"Quality: {quality}. "
-                    "Output ONLY a long, detailed photorealistic English prompt starting with 'A photorealistic shot of...'."
+                    f"Task: Create a photorealistic English image prompt.\n"
+                    f"Subject: {st.session_state.char_description}\n"
+                    f"Situation: {context}\n"
+                    f"EXPOSURE LEVEL [{sex_level}/5]: {style_instruction}\n"
+                    f"Body: {bust_ins}, Extras: {', '.join(extras)}\n"
+                    f"Quality: Masterpiece, 8k, raw photo, realistic skin texture.\n"
+                    f"CRITICAL RULE: Strictly follow the EXPOSURE LEVEL. "
+                    f"If level is 1, do not use words like 'sexy'. If level is 5, describe the subject as 'naked' or 'nude'."
                 )
 
                 final_p = call_grok_api([{"role":"user","content":final_instruction}])
                 
-                # 強制強調タグの追加
+                # スケール調整
+                if sex_level == 5: final_p += ", (nude:1.5), (completely naked:1.5)"
                 if bust_type == "貧乳": final_p += ", (flat chest:1.9)"
                 if nipple_poke: final_p += ", (nipples poking through clothing:1.4)"
                 
-                # 結果表示
                 st.session_state.prompt_history.append({"prompt": final_p, "image": display_img})
-                st.success(f"Result {i+1}")
+                st.success(f"Result {i+1} (Level {sex_level})")
                 if display_img: st.image(display_img, width=200)
                 st.code(final_p)
                 st.text_area(f"Copy {i+1}", value=final_p, height=100, key=f"copy_{i}_{random.randint(0,99999)}")
