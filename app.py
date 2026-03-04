@@ -59,13 +59,23 @@ def call_grok_api(messages):
         return res.json()["choices"][0]["message"]["content"].strip() if res.status_code == 200 else f"Error: {res.status_code}"
     except: return "Connection Error"
 
-# --- AI提案：シンプルに丸投げ ---
+# --- AI提案：超詳細描写モード ---
 def update_scene_suggestion():
-    with st.spinner("裏垢女子っぽいシーンを考え中..."):
-        # 余計な細工なし、ストレートな依頼
+    with st.spinner("神は細部に宿る... 詳細なシーンを構成中..."):
+        # AIに対して「1行で」ではなく「詳細に」かつ「裏垢っぽく」と指示
         prompt = [{
             "role": "user", 
-            "content": "裏垢女子がSNSにアップしそうな、あざとくてセクシーな自撮りシチュエーションを1つ考えてください。場所、服装、状態を具体的に。『場所：〇〇、服装：××、状態：△△』の形式で日本語1行で出力して。"
+            "content": (
+                "Create an incredibly detailed and alluring 'Ura-aka' (hidden SNS) style selfie scene for a Japanese woman. "
+                "Think like a professional photographer and a social media influencer. "
+                "Describe the exact lighting (e.g., dim warm lamp, moonlight, harsh neon), "
+                "the texture of clothing (e.g., sheer lace, tight ribbed knit, glossy silk), "
+                "the cluttered but aesthetic background (e.g., unmade bed, luxury car interior with ambient light, messy vanity mirror), "
+                "and the camera angle (e.g., high angle, close-up, mirror reflection). "
+                "Output format: '場所：〇〇、服装：××、状態：△△'. "
+                "IMPORTANT: Make the '状態' part very long and descriptive to ensure high-quality image generation. "
+                "Output in Japanese, 1 line only."
+            )
         }]
         res = call_grok_api(prompt)
         if "Error" not in res:
