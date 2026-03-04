@@ -59,22 +59,22 @@ def call_grok_api(messages):
         return res.json()["choices"][0]["message"]["content"].strip() if res.status_code == 200 else f"Error: {res.status_code}"
     except: return "Connection Error"
 
-# --- AI提案：超詳細描写モード ---
-def update_scene_suggestion():
-    with st.spinner("神は細部に宿る... 詳細なシーンを構成中..."):
-        # AIに対して「1行で」ではなく「詳細に」かつ「裏垢っぽく」と指示
+# AIに「場所のジャンル」を意識させ、ホテル一辺倒を打破する
         prompt = [{
             "role": "user", 
             "content": (
-                "Create an incredibly detailed and alluring 'Ura-aka' (hidden SNS) style selfie scene for a Japanese woman. "
-                "Think like a professional photographer and a social media influencer. "
-                "Describe the exact lighting (e.g., dim warm lamp, moonlight, harsh neon), "
-                "the texture of clothing (e.g., sheer lace, tight ribbed knit, glossy silk), "
-                "the cluttered but aesthetic background (e.g., unmade bed, luxury car interior with ambient light, messy vanity mirror), "
-                "and the camera angle (e.g., high angle, close-up, mirror reflection). "
-                "Output format: '場所：〇〇、服装：××、状態：△△'. "
-                "IMPORTANT: Make the '状態' part very long and descriptive to ensure high-quality image generation. "
-                "Output in Japanese, 1 line only."
+                "Create an incredibly detailed 'Ura-aka' style selfie scene. "
+                "CRITICAL: Do not always choose a hotel or lingerie. "
+                "Randomly pick ONE category for the location: "
+                "1. [Daily Life]: Kitchen, cluttered bedroom, laundry room, bathroom mirror. "
+                "2. [Public/Risky]: Fitting room, elevator, cinema seat, quiet library corner, train seat. "
+                "3. [Outdoor/Night]: Night pool, car interior at gas station, park at night, balcony. "
+                "4. [Trendy]: Stylish cafe, luxury gym, parking lot, rooftop. "
+                
+                "Describe the specific lighting (e.g. smartphone flash, harsh fluorescent, sunset), "
+                "clothing with texture (e.g. sheer blouse, tight yoga pants, oversized hoodie with nothing underneath), "
+                "and a suggestive pose that feels like a real SNS post. "
+                "Format: '場所：〇〇、服装：××、状態：△△'. Japanese, 1 line only."
             )
         }]
         res = call_grok_api(prompt)
