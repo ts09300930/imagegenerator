@@ -50,23 +50,35 @@ def call_grok_api(messages):
     try:
         res = requests.post(GROK_API_URL, json=payload, headers=headers, timeout=60)
         
-        # レスポンスがJSON形式か安全にチェック
+        # 1. まずレスポンスがJSONとして解析できるか
         try:
             json_res = res.json()
-        except Exception:
+        except:
             return f"API_ERROR_{res.status_code}: Response is not JSON. {res.text[:100]}"
 
+        # 2. ステータスコードが200（成功）か
         if res.status_code == 200:
-            return json_res["choices"][0]["message"]["content"].strip()
+            # 辞書型かつ必要なキーがあるか厳密にチェック
+            if isinstance(json_res, dict) and "choices" in json_res:
+                return json_res["choices"][0]["message"]["content"].strip()
+            else:
+                return f"API_ERROR: Unexpected JSON structure: {str(json_res)[:100]}"
         else:
-            # json_resが辞書であることを確認してからgetを使用（エラーの核心部分を修正）
+            # 3. エラー時：json_resが辞書なら get を使い、そうでなければ文字列化する
             if isinstance(json_res, dict):
-                msg = json_res.get('error', {}).get('message', 'Unknown API Error')
+                # errorキーの中身も辞書とは限らないので徹底ガード
+                error_obj = json_res.get('error', {})
+                if isinstance(error_obj, dict):
+                    msg = error_obj.get('message', 'Unknown API Error')
+                else:
+                    msg = str(error_obj)
             else:
                 msg = str(json_res)
             return f"API_ERROR_{res.status_code}: {msg}"
+
     except Exception as e:
-        # e(例外オブジェクト)を直接操作せず、文字列として返す
+        # キャプチャのエラー(CONNECTION_ERROR)の発生源。
+        # ここで .get() などを使わず、確実に文字列として例外を返す。
         return f"CONNECTION_ERROR: {str(e)}"
 
 def process_image(uploaded_file):
@@ -106,7 +118,7 @@ else:
     gen_count = c1.selectbox("生成数", options=list(range(1, 11)), index=0)
     if c2.button(f"🎲 {gen_count}件を自動生成", use_container_width=True):
         res = call_grok_api([{"role": "user", "content": f"日本のSNS自撮り風のシチュエーション案を{gen_count}個考えて。'場所：、服装：、状態：'の形式で。"}] )
-        if "API_ERROR" not in res:
+        if "API_ERROR" not in res and "CONNECTION_ERROR" not in res:
             st.session_state.scenes_list = [s.strip() for s in res.split('\n') if "場所：" in s][:gen_count]
     if st.session_state.scenes_list:
         for i, scene in enumerate(st.session_state.scenes_list):
@@ -149,10 +161,8 @@ if st.button("🚀 プロンプトを一括生成", type="primary", use_containe
                 with st.spinner(f"画像 {i+1} を解析中..."):
                     # メッセージ構造をVision用に最適化
                     current_ctx = call_grok_api([{"role":"user","content":[{"type":"text","text":"Describe THIS specific image's background and outfit."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{img_b64}"}}]}])
-                is_img = True
             else:
                 current_ctx = item["content"]
-                is_img = False
 
             if "API_ERROR" in current_ctx or "CONNECTION_ERROR" in current_ctx:
                 st.error(f"❌ 解析失敗 {i+1}: {current_ctx}")
