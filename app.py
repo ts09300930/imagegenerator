@@ -48,12 +48,11 @@ def call_grok_api(messages):
 
 # --- 状態初期化 ---
 if 'char_description' not in st.session_state: st.session_state.char_description = ""
-if 'scenes_list' not in st.session_state: st.session_state.scenes_list = [""] # 初期は1件
+if 'scenes_list' not in st.session_state: st.session_state.scenes_list = [] # 最初は空に
 if 'prompt_history' not in st.session_state: st.session_state.prompt_history = []
 
 # --- AI提案：複数一括生成関数 ---
 def generate_multiple_scenes(count):
-    # buffer_count分しっかり多めに作らせて、質の悪い行や挨拶を排除する
     buffer_count = count + 2
     with st.spinner(f"裏垢女子の日常を{count}パターン妄想中..."):
         prompt = [{
@@ -67,24 +66,12 @@ def generate_multiple_scenes(count):
         }]
         res = call_grok_api(prompt)
         if "Error" not in res:
-            # 1. 改行でバラして、空行を消す
             all_lines = [s.strip() for s in res.split('\n') if s.strip()]
-            # 2. 「場所：」が含まれる有効な行だけを抽出（挨拶行を完全排除）
             valid_scenes = [line for line in all_lines if "場所：" in line]
-            
-            # 3. 指定された数(count)だけを上から順に詰める
-            new_list = []
-            for i in range(count):
-                if i < len(valid_scenes):
-                    new_list.append(valid_scenes[i])
-                else:
-                    new_list.append("")
-            
-            # セッションを更新
-            st.session_state.scenes_list = new_list
+            st.session_state.scenes_list = valid_scenes[:count]
 
 # --- UI ---
-st.title("Higgsfield Gen v8.1 (Fixed)")
+st.title("Higgsfield Gen v8.2 (Logic Fix)")
 
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
@@ -95,26 +82,34 @@ st.session_state.char_description = st.text_area("身体的特徴", value=st.ses
 
 st.markdown("---")
 
-st.markdown("### 🎬 2. シチュエーション（一括生成）")
-mode = st.radio("生成モード", ["📷 画像解析", "🎲 AIに丸投げ（複数可）"], horizontal=True)
+st.markdown("### 🎬 2. シチュエーション設定")
+mode = st.radio("入力モードを選択", ["📷 画像解析（アップロード）", "🎲 AI自動生成（テキスト）"], horizontal=True)
 
-if mode == "📷 画像解析":
+# 重要な修正：モードごとにターゲットを完全に分ける
+targets = []
+
+if mode == "📷 画像解析（アップロード）":
     uploaded_images = st.file_uploader("画像アップロード", type=["jpg","png","heic"], accept_multiple_files=True)
+    if uploaded_images:
+        for f in uploaded_images:
+            targets.append({"type": "image", "content": f})
 else:
     c1, c2 = st.columns([1, 2])
     gen_count = c1.selectbox("生成数", options=list(range(1, 11)), index=0)
-    if c2.button(f"🎲 {gen_count}件のシチュエーションを自動生成", use_container_width=True):
+    if c2.button(f"🎲 {gen_count}件を自動生成", use_container_width=True):
         generate_multiple_scenes(gen_count)
     
-    # 【最重要：修正箇所】動的に生成された入力欄を表示
-    st.markdown(f"**現在の候補: {len(st.session_state.scenes_list)} 件**")
-    updated_scenes = []
-    for i, scene in enumerate(st.session_state.scenes_list):
-        # keyに中身のハッシュを含めることで、空欄から中身有りに変わった際に強制リロードさせる
-        scene_key = f"scene_input_{i}_{hash(scene)}"
-        new_scene = st.text_area(f"シチュエーション {i+1}", value=scene, key=scene_key)
-        updated_scenes.append(new_scene)
-    st.session_state.scenes_list = updated_scenes
+    if st.session_state.scenes_list:
+        st.markdown(f"**現在の候補: {len(st.session_state.scenes_list)} 件**")
+        new_scenes = []
+        for i, scene in enumerate(st.session_state.scenes_list):
+            # 1番目が空欄にならないよう、一意のkeyを与える
+            s_val = st.text_area(f"シチュエーション {i+1}", value=scene, key=f"txt_{i}_{hash(scene)}")
+            new_scenes.append(s_val)
+        st.session_state.scenes_list = new_scenes
+        for s in st.session_state.scenes_list:
+            if s.strip():
+                targets.append({"type": "text", "content": s})
 
 st.markdown("---")
 st.markdown("### ⚙️ 共通オプション")
@@ -135,23 +130,27 @@ sex_map = {1: "modest", 2: "casual", 3: "sexy", 4: "revealing", 5: "extreme"}
 
 # --- 生成実行 ---
 if st.button("🚀 全てのプロンプトを一括生成", type="primary", use_container_width=True):
+    if not targets:
+        st.warning("画像アップロードか、AI生成を行ってください。")
+        st.stop()
+        
     save_char_history(st.session_state.char_description)
     
-    if mode == "📷 画像解析" and uploaded_images:
-        targets = [{"type": "image", "content": f} for f in uploaded_images]
-    else:
-        targets = [{"type": "text", "content": s} for s in st.session_state.scenes_list if s.strip()]
-
     for i, item in enumerate(targets):
         with st.container():
+            # コンテキスト（説明文）の取得
             if item["type"] == "image":
-                b64 = base64.b64encode(item['content'].getvalue()).decode('utf-8')
-                context = call_grok_api([{"role":"user","content":[{"type":"text","text":"Describe details."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
-                display_img = item['content'].getvalue()
+                with st.spinner(f"画像 {i+1} 解析中..."):
+                    b64 = base64.b64encode(item['content'].getvalue()).decode('utf-8')
+                    # 画像解析用のプロンプトをシンプルに
+                    res_context = call_grok_api([{"role":"user","content":[{"type":"text","text":"Describe this girl's location, outfit, and pose in detail for an image prompt."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
+                    context = res_context
+                    display_img = item['content'].getvalue()
             else:
                 context = item["content"]
                 display_img = None
 
+            # プロンプト合成
             with st.spinner(f"プロンプト {i+1} 合成中..."):
                 quality = "Masterpiece, 8k UHD, photorealistic, cinematic lighting, raw smartphone photo style."
                 sex_text = sex_map[sex_level]
@@ -167,21 +166,24 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
 
                 final_instruction = (
                     f"Subject: {st.session_state.char_description}, "
-                    f"Scene context: {context}, "
-                    f"Exposure: {sex_text}, Body: {bust_ins}, "
+                    f"Context: {context}, "
+                    f"Style: {sex_text}, Body: {bust_ins}, "
                     f"Extras: {', '.join(extras)}, "
                     f"Quality: {quality}. "
-                    "Create ONE long, detailed photorealistic English prompt starting with 'A photorealistic shot of...'."
+                    "Output ONLY a long, detailed photorealistic English prompt starting with 'A photorealistic shot of...'."
                 )
 
                 final_p = call_grok_api([{"role":"user","content":final_instruction}])
+                
+                # 強制強調タグの追加
                 if bust_type == "貧乳": final_p += ", (flat chest:1.9)"
                 if nipple_poke: final_p += ", (nipples poking through clothing:1.4)"
                 
+                # 結果表示
                 st.session_state.prompt_history.append({"prompt": final_p, "image": display_img})
                 st.success(f"Result {i+1}")
+                if display_img: st.image(display_img, width=200)
                 st.code(final_p)
-                # キーをユニークにしてコピーエラーを防ぐ
                 st.text_area(f"Copy {i+1}", value=final_p, height=100, key=f"copy_{i}_{random.randint(0,99999)}")
 
 # --- 履歴 ---
