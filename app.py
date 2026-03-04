@@ -7,7 +7,6 @@ from pillow_heif import register_heif_opener
 import io
 from PIL import Image
 import random
-import os
 
 # HEICサポート
 register_heif_opener()
@@ -59,8 +58,9 @@ def call_grok_api(messages):
         return res.json()["choices"][0]["message"]["content"].strip() if res.status_code == 200 else f"Error: {res.status_code}"
     except: return "Connection Error"
 
-with st.spinner("日常に潜むエロスを構成中..."):
-        # カテゴリーを提示してAIの思考をバラけさせる
+# --- 修正ポイント：AI提案を「関数」の中に正しく入れる ---
+def update_scene_suggestion():
+    with st.spinner("日常に潜むエロスを構成中..."):
         prompt = [{
             "role": "user", 
             "content": (
@@ -90,7 +90,7 @@ if 'scene_description' not in st.session_state: st.session_state.scene_descripti
 if 'prompt_history' not in st.session_state: st.session_state.prompt_history = []
 
 # --- UI ---
-st.title("Higgsfield Gen v7.2")
+st.title("Higgsfield Gen v7.4")
 
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
@@ -111,7 +111,7 @@ mode = st.radio("生成モード", ["📷 画像解析", "🎲 AIに丸投げ"],
 if mode == "📷 画像解析":
     uploaded_images = st.file_uploader("画像アップロード", type=["jpg","png","heic"], accept_multiple_files=True)
 else:
-    # 🎲ボタン：ストレートにAIへ依頼
+    # 🎲ボタン：関数を呼び出す
     st.button("🎲 裏垢女子っぽいシーンを提案させる", on_click=update_scene_suggestion)
     
     if "scene_area_widget" not in st.session_state:
