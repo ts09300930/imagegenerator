@@ -59,20 +59,20 @@ def call_grok_api(messages):
         return res.json()["choices"][0]["message"]["content"].strip() if res.status_code == 200 else f"Error: {res.status_code}"
     except: return "Connection Error"
 
-# AIに「場所のジャンル」を意識させ、ホテル一辺倒を打破する
+with st.spinner("日常に潜むエロスを構成中..."):
+        # カテゴリーを提示してAIの思考をバラけさせる
         prompt = [{
             "role": "user", 
             "content": (
-                "Create an incredibly detailed 'Ura-aka' style selfie scene. "
+                "Create an incredibly detailed 'Ura-aka' (hidden SNS) style selfie scene. "
                 "CRITICAL: Do not always choose a hotel or lingerie. "
                 "Randomly pick ONE category for the location: "
-                "1. [Daily Life]: Kitchen, cluttered bedroom, laundry room, bathroom mirror. "
+                "1. [Daily]: Kitchen, cluttered bedroom, laundry room, bathroom mirror. "
                 "2. [Public/Risky]: Fitting room, elevator, cinema seat, quiet library corner, train seat. "
                 "3. [Outdoor/Night]: Night pool, car interior at gas station, park at night, balcony. "
                 "4. [Trendy]: Stylish cafe, luxury gym, parking lot, rooftop. "
-                
-                "Describe the specific lighting (e.g. smartphone flash, harsh fluorescent, sunset), "
-                "clothing with texture (e.g. sheer blouse, tight yoga pants, oversized hoodie with nothing underneath), "
+                "Describe exact lighting (smartphone flash, neon, sunset), "
+                "texture of clothing (sheer lace, tight yoga pants, oversized hoodie), "
                 "and a suggestive pose that feels like a real SNS post. "
                 "Format: '場所：〇〇、服装：××、状態：△△'. Japanese, 1 line only."
             )
