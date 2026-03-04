@@ -69,16 +69,16 @@ def generate_multiple_scenes(count):
             st.session_state.scenes_list = valid_scenes[:count]
 
 # --- UI ---
-st.title("Higgsfield Gen v8.3 (Fidelity Fix)")
+st.title("Higgsfield Gen v8.4 (Strict Independence)")
 
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
 sel_h = st.selectbox("過去の履歴", ["-- 履歴から選択 --"] + char_h)
 if sel_h != "-- 履歴から選択 --": st.session_state.char_description = sel_h
-st.session_state.char_description = st.text_area("身体的特徴", value=st.session_state.char_description)
+st.session_state.char_description = st.text_area("身体的特徴 (これが画像解析より最優先されます)", value=st.session_state.char_description)
 
 st.markdown("---")
-st.markdown("### 🎬 2. シチュエーション設定")
+st.markdown("### 🎬 2. シチューション設定")
 mode = st.radio("入力モードを選択", ["📷 画像解析（アップロード）", "🎲 AI自動生成（テキスト）"], horizontal=True)
 
 targets = []
@@ -125,28 +125,31 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
     save_char_history(st.session_state.char_description)
     
     for i, item in enumerate(targets):
+        # 各ループでコンテキストを完全にリセット
+        current_image_context = "" 
+        display_img = None
+        is_image_mode = False
+
         with st.container():
             if item["type"] == "image":
-                with st.spinner(f"画像 {i+1} の背景・環境を完全解析中..."):
-                    b64 = base64.b64encode(item['content'].getvalue()).decode('utf-8')
-                    # 背景、場所、地面、ベンチ、ライティングを最優先で言語化させる
+                is_image_mode = True
+                display_img = item['content'].getvalue()
+                with st.spinner(f"画像 {i+1} を単独解析中..."):
+                    b64 = base64.b64encode(display_img).decode('utf-8')
+                    # 他の画像の影響を受けないよう、この画像だけの情報を抽出
                     analysis_prompt = (
-                        "Provide a professional Stable Diffusion prompt description. PRIORITY:\n"
-                        "1. BACKGROUND & ENVIRONMENT: Describe the exact location (e.g., outdoor park, concrete wall, stone bench), floor texture, and background objects (bushes, trees).\n"
-                        "2. OUTFIT: Exact details of clothing (e.g., blue striped dress, buttons, fabric).\n"
-                        "3. LIGHTING & ANGLE: Natural sunlight, high/low angle, and atmosphere.\n"
-                        "Focus on the setting as much as the person."
+                        "Describe THIS specific image ONLY. Do not refer to any previous images.\n"
+                        "1. BACKGROUND: Describe the exact setting (e.g., stone bench, concrete wall, park greenery).\n"
+                        "2. OUTFIT: Exact details of the clothes in THIS image (e.g., blue stripes, specific fabric).\n"
+                        "3. ATMOSPHERE: Lighting and camera angle of THIS image."
                     )
-                    res_context = call_grok_api([{"role":"user","content":[{"type":"text","text":analysis_prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
-                    context = res_context
-                    display_img = item['content'].getvalue()
-                    is_image_mode = True
+                    # messagesを毎回新しく作成して、前の画像履歴が混ざらないようにする
+                    current_image_context = call_grok_api([{"role":"user","content":[{"type":"text","text":analysis_prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
             else:
-                context = item["content"]
-                display_img = None
+                current_image_context = item["content"]
                 is_image_mode = False
 
-            with st.spinner(f"プロンプト {i+1} 合成中..."):
+            with st.spinner(f"プロンプト {i+1} を独立合成中..."):
                 quality = "Masterpiece, 8k UHD, photorealistic, cinematic lighting, raw smartphone photo style."
                 
                 extras = []
@@ -158,21 +161,22 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
                 bust_ins = "Flat chest" if bust_type == "貧乳" else ("Large bust" if bust_type == "豊満" else "")
 
                 if is_image_mode:
-                    # 背景を「MANDATORY（必須条件）」として固定する指示
+                    # 身体的特徴(Subject)を最優先しつつ、背景・服装を「この画像のものだけ」に限定
                     instruction_content = (
-                        f"Target Subject: {st.session_state.char_description}, "
-                        f"MANDATORY ENVIRONMENT: {context}, "
-                        f"Body: {bust_ins}, Extras: {', '.join(extras)}, Quality: {quality}. "
-                        "CRITICAL: Keep the exact background, location, and setting described in 'MANDATORY ENVIRONMENT'. "
-                        "Do NOT change the outdoor bench, wall, or greenery. Replicate the atmosphere perfectly."
+                        f"Create a prompt based SOLELY on the following details. Discard any previous image information.\n"
+                        f"Target Person Features (HIGHEST PRIORITY): {st.session_state.char_description}, {bust_ins}.\n"
+                        f"Mandatory Background & Outfit from THIS image: {current_image_context}.\n"
+                        f"Additional Tags: {', '.join(extras)}, Quality: {quality}.\n"
+                        "Constraint: The output must strictly combine the 'Target Person Features' with the 'Mandatory Background & Outfit' of THIS image only."
                     )
                 else:
                     instruction_content = (
-                        f"Subject: {st.session_state.char_description}, Context: {context}, "
+                        f"Subject: {st.session_state.char_description}, Context: {current_image_context}, "
                         f"Style: {sex_map[sex_level]}, Body: {bust_ins}, Extras: {', '.join(extras)}, Quality: {quality}."
                     )
 
-                final_p = call_grok_api([{"role":"user","content": f"{instruction_content} Output ONLY the prompt starting with 'A photorealistic shot of...'"}])
+                # API呼び出しも毎回「独立した1回きりの命令」として扱う
+                final_p = call_grok_api([{"role":"user","content": f"{instruction_content} Output ONLY the English prompt starting with 'A photorealistic shot of...'"}])
                 
                 # 強制補正タグ
                 if not is_image_mode:
