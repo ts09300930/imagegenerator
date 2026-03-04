@@ -6,6 +6,7 @@ import pandas as pd
 from pillow_heif import register_heif_opener
 import io
 from PIL import Image
+import os
 
 # HEICサポート
 register_heif_opener()
@@ -63,18 +64,20 @@ c_init, s_init = load_app_data()
 if 'char_description' not in st.session_state: st.session_state.char_description = c_init
 if 'scene_description' not in st.session_state: st.session_state.scene_description = s_init
 if 'prompt_history' not in st.session_state: st.session_state.prompt_history = []
+# AI提案時にテキストエリアを強制更新するためのカウンター
+if 'scene_counter' not in st.session_state: st.session_state.scene_counter = 0
 
 # --- UI構築 ---
-st.title("Higgsfield Prompt Gen v6.4 (Final)")
+st.title("Higgsfield Prompt Gen v6.5")
 
 # 1. 特徴入力
 st.markdown("### 👩 1. 女性の身体的特徴")
 char_h = load_char_history()
-sel_h = st.selectbox("過去の履歴から選ぶ (最大100件)", ["-- 履歴から選択 --"] + char_h)
+sel_h = st.selectbox("過去の履歴から選ぶ", ["-- 履歴から選択 --"] + char_h)
 if sel_h != "-- 履歴から選択 --":
     st.session_state.char_description = sel_h
 
-char_input = st.text_area("身体的特徴（自動保存）", value=st.session_state.char_description, key="char_area")
+char_input = st.text_area("身体的特徴", value=st.session_state.char_description, key="char_area")
 if char_input != st.session_state.char_description:
     st.session_state.char_description = char_input
     save_app_data(char_input, st.session_state.scene_description)
@@ -83,7 +86,7 @@ st.markdown("---")
 
 # 2. シチュエーション
 st.markdown("### 🎬 2. シチュエーション")
-mode = st.radio("生成モードを選択", ["📷 画像から取得", "🎲 AI丸投げ・テキスト入力"], horizontal=True)
+mode = st.radio("生成モード", ["📷 画像から取得", "🎲 AI丸投げ・テキスト入力"], horizontal=True)
 
 if mode == "📷 画像から取得":
     uploaded_images = st.file_uploader("参考画像(複数可)", type=["jpg","png","heic"], accept_multiple_files=True)
@@ -93,15 +96,17 @@ else:
             res = call_grok_api([{"role":"user","content":"Suggest a sexy Japanese SNS selfie scene. Format: '場所：〇〇、服装：××、状態：△△'. Japanese, 1 line."}])
             if "Error" not in res:
                 st.session_state.scene_description = res
+                st.session_state.scene_counter += 1  # Keyを更新して再描画を強制
                 save_app_data(st.session_state.char_description, res)
                 st.rerun()
 
-    scene_input = st.text_area("シチュエーション内容", value=st.session_state.scene_description, key="scene_area")
+    # ★修正の核心：keyにカウンターを含めることで、AI提案時にテキストエリアを強制リセット
+    scene_input = st.text_area("シチュエーション内容", value=st.session_state.scene_description, key=f"scene_area_{st.session_state.scene_counter}")
     if scene_input != st.session_state.scene_description:
         st.session_state.scene_description = scene_input
         save_app_data(st.session_state.char_description, scene_input)
 
-# 3. オプション（最初の実装から復活）
+# 3. オプション
 st.markdown("---")
 st.markdown("### ⚙️ 追加オプション")
 c1, c2 = st.columns(2)
@@ -109,15 +114,14 @@ sex_level = c1.select_slider("露出レベル", options=[1,2,3,4,5], value=3)
 bust_type = c2.radio("胸のサイズ", ["貧乳","普通","豊満"], horizontal=True)
 
 col_a, col_b = st.columns(2)
-tight_clothing = col_a.checkbox("タイトな服装（ボディライン強調）", value=False)
-nipple_poke = col_b.checkbox("乳首ぽち（布越し）", value=False)
+tight_clothing = col_a.checkbox("タイトな服装", value=False)
+nipple_poke = col_b.checkbox("乳首ぽち", value=False)
 
 col_d, col_e, col_f = st.columns(3)
-mask_on = col_d.checkbox("白マスク着用", value=False)
-iphone_selfie = col_e.checkbox("iPhone自撮り構図", value=False)
-face_hidden = col_f.checkbox("顔を隠す(匿名)", value=False)
+mask_on = col_d.checkbox("白マスク", value=False)
+iphone_selfie = col_e.checkbox("iPhone自撮り", value=False)
+face_hidden = col_f.checkbox("顔を隠す", value=False)
 
-# 露出レベルの英語変換
 sex_map = {
     1: "conservative outfit, fully clothed, no skin exposure, modest style",
     2: "casual, slightly revealing, natural look",
@@ -139,7 +143,7 @@ if st.button("🚀 プロンプトを一括生成", type="primary", use_containe
     for i, item in enumerate(tasks):
         with st.container():
             if item["type"] == "image":
-                with st.spinner(f"画像{i+1}を解析中..."):
+                with st.spinner(f"画像{i+1}解析中..."):
                     st.image(item['file'], width=200)
                     b64 = base64.b64encode(item['file'].getvalue()).decode('utf-8')
                     context = call_grok_api([{"role":"user","content":[{"type":"text","text":"Describe clothing and environment in detail English."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
@@ -148,46 +152,40 @@ if st.button("🚀 プロンプトを一括生成", type="primary", use_containe
                 context = item["content"]
                 display_img = None
 
-            with st.spinner(f"プロンプト{i+1}を合成中..."):
-                quality = "Masterpiece, 8k UHD, photorealistic, incredibly detailed skin, visible pores, cinematic lighting, shot on iPhone 15 Pro."
+            with st.spinner(f"合成中..."):
+                quality = "Masterpiece, 8k UHD, photorealistic, incredibly detailed skin, visible pores, cinematic lighting."
                 sex_text = sex_map[sex_level]
                 
-                # 追加指示の組み立て
                 extras = []
-                if tight_clothing: extras.append("extremely tight-fitting skin-tight clothing clinging to every curve")
-                if nipple_poke: extras.append("visible nipple outlines poking through the fabric")
+                if tight_clothing: extras.append("extremely tight-fitting skin-tight clothing")
+                if nipple_poke: extras.append("visible nipple outlines poking through fabric")
                 if mask_on: extras.append("wearing a white surgical face mask")
-                if iphone_selfie: extras.append("holding iPhone, taking a mirror selfie")
-                if face_hidden: extras.append("face hidden or cropped, only from mouth down visible")
+                if iphone_selfie: extras.append("holding iPhone, taking mirror selfie")
+                if face_hidden: extras.append("face hidden or cropped")
                 
                 bust_ins = ""
-                if bust_type == "貧乳":
-                    bust_ins = "Completely flat chest, bony petite torso, prominent collarbones, no breast volume."
-                elif bust_type == "豊満":
-                    bust_ins = "Large ample bust, voluptuous curvaceous figure."
+                if bust_type == "貧乳": bust_ins = "Completely flat chest, bony petite torso."
+                elif bust_type == "豊満": bust_ins = "Large ample bust, voluptuous curvaceous figure."
 
                 final_instruction = (
-                    f"Combine these: [Subject: {st.session_state.char_description}], [Scene: {context}], "
+                    f"Combine: [Subject: {st.session_state.char_description}], [Scene: {context}], "
                     f"[Exposure: {sex_text}], [Body: {bust_ins}], [Extras: {', '.join(extras)}], [Quality: {quality}]. "
-                    "Output ONE natural English paragraph starting with 'A photorealistic shot of...'."
+                    "Output ONE English paragraph starting with 'A photorealistic shot of...'."
                 )
 
                 final_p = call_grok_api([{"role":"user","content":final_instruction}])
-                
-                # 重み付けの強制付加
                 if bust_type == "貧乳": final_p += ", (flat chest:1.9), (tiny breasts:1.5)"
                 if nipple_poke: final_p += ", (nipples poking through clothing:1.4)"
                 
                 st.session_state.prompt_history.append({"prompt": final_p, "image": display_img})
-                
                 st.success(f"生成完了 {i+1}")
                 st.code(final_p)
-                st.text_area("コピー用", value=final_p, height=100, key=f"copy_{i}_{os.urandom(4).hex()}")
+                st.text_area("コピー", value=final_p, height=100, key=f"copy_{i}_{os.urandom(4).hex()}")
 
-# --- 履歴表示 ---
+# --- 履歴 ---
 if st.session_state.prompt_history:
     st.markdown("---")
-    st.markdown("### 🕒 生成履歴（最新10件）")
+    st.markdown("### 🕒 生成履歴")
     for idx, hist in enumerate(reversed(st.session_state.prompt_history[-10:])):
         with st.expander(f"履歴 {len(st.session_state.prompt_history) - idx}"):
             if hist["image"]: st.image(hist["image"], width=150)
