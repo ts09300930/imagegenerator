@@ -53,7 +53,7 @@ if 'prompt_history' not in st.session_state: st.session_state.prompt_history = [
 
 # --- AI提案：複数一括生成関数 ---
 def generate_multiple_scenes(count):
-    # buffer_count分しっかり多めに作らせる
+    # buffer_count分しっかり多めに作らせて、質の悪い行や挨拶を排除する
     buffer_count = count + 2
     with st.spinner(f"裏垢女子の日常を{count}パターン妄想中..."):
         prompt = [{
@@ -67,25 +67,24 @@ def generate_multiple_scenes(count):
         }]
         res = call_grok_api(prompt)
         if "Error" not in res:
-            # 1. 全ての行を分解し、余計な空白を消す
+            # 1. 改行でバラして、空行を消す
             all_lines = [s.strip() for s in res.split('\n') if s.strip()]
-            
-            # 2. 「場所：」が含まれる有効な行だけをリストに抽出
-            # これにより、1行目が挨拶や空行だったとしてもリストから排除される
+            # 2. 「場所：」が含まれる有効な行だけを抽出（挨拶行を完全排除）
             valid_scenes = [line for line in all_lines if "場所：" in line]
             
-            # 3. 指定数(count)に足りるまで、抽出した有効なシーンを上から順に詰め込む
-            # st.session_stateを一度完全にクリアしてから上書きする
+            # 3. 指定された数(count)だけを上から順に詰める
             new_list = []
             for i in range(count):
                 if i < len(valid_scenes):
                     new_list.append(valid_scenes[i])
                 else:
-                    new_list.append("") # 万が一足りない場合のみ空欄
+                    new_list.append("")
             
+            # セッションを更新
             st.session_state.scenes_list = new_list
+
 # --- UI ---
-st.title("Higgsfield Gen v8.0 (Multi-Batch)")
+st.title("Higgsfield Gen v8.1 (Fixed)")
 
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
@@ -107,11 +106,13 @@ else:
     if c2.button(f"🎲 {gen_count}件のシチュエーションを自動生成", use_container_width=True):
         generate_multiple_scenes(gen_count)
     
-    # 動的に生成された入力欄を表示
+    # 【最重要：修正箇所】動的に生成された入力欄を表示
     st.markdown(f"**現在の候補: {len(st.session_state.scenes_list)} 件**")
     updated_scenes = []
     for i, scene in enumerate(st.session_state.scenes_list):
-        new_scene = st.text_area(f"シチュエーション {i+1}", value=scene, key=f"scene_input_{i}")
+        # keyに中身のハッシュを含めることで、空欄から中身有りに変わった際に強制リロードさせる
+        scene_key = f"scene_input_{i}_{hash(scene)}"
+        new_scene = st.text_area(f"シチュエーション {i+1}", value=scene, key=scene_key)
         updated_scenes.append(new_scene)
     st.session_state.scenes_list = updated_scenes
 
@@ -136,7 +137,6 @@ sex_map = {1: "modest", 2: "casual", 3: "sexy", 4: "revealing", 5: "extreme"}
 if st.button("🚀 全てのプロンプトを一括生成", type="primary", use_container_width=True):
     save_char_history(st.session_state.char_description)
     
-    # 処理対象の決定
     if mode == "📷 画像解析" and uploaded_images:
         targets = [{"type": "image", "content": f} for f in uploaded_images]
     else:
@@ -165,7 +165,6 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
                 
                 bust_ins = "Flat chest" if bust_type == "貧乳" else ("Large bust" if bust_type == "豊満" else "")
 
-                # 身体特徴 + シチュエーション + オプションを合成
                 final_instruction = (
                     f"Subject: {st.session_state.char_description}, "
                     f"Scene context: {context}, "
@@ -182,7 +181,8 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
                 st.session_state.prompt_history.append({"prompt": final_p, "image": display_img})
                 st.success(f"Result {i+1}")
                 st.code(final_p)
-                st.text_area(f"Copy {i+1}", value=final_p, height=100, key=f"copy_{i}_{os.urandom(4).hex()}")
+                # キーをユニークにしてコピーエラーを防ぐ
+                st.text_area(f"Copy {i+1}", value=final_p, height=100, key=f"copy_{i}_{random.randint(0,99999)}")
 
 # --- 履歴 ---
 if st.session_state.prompt_history:
