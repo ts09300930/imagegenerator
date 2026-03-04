@@ -69,7 +69,7 @@ def generate_multiple_scenes(count):
             st.session_state.scenes_list = valid_scenes[:count]
 
 # --- UI ---
-st.title("Higgsfield Gen v8.2 (Fidelity Fix)")
+st.title("Higgsfield Gen v8.3 (Fidelity Fix)")
 
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
@@ -127,10 +127,17 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
     for i, item in enumerate(targets):
         with st.container():
             if item["type"] == "image":
-                with st.spinner(f"画像 {i+1} 解析中..."):
+                with st.spinner(f"画像 {i+1} の背景・環境を完全解析中..."):
                     b64 = base64.b64encode(item['content'].getvalue()).decode('utf-8')
-                    # 【改良】画像解析時に「そのまま再現するための情報」を極限まで引き出す
-                    res_context = call_grok_api([{"role":"user","content":[{"type":"text","text":"Describe this image for a Stable Diffusion prompt. Focus on: exact outfit, colors, fabric texture, posture, lighting, and camera angle. Be extremely detailed."},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
+                    # 背景、場所、地面、ベンチ、ライティングを最優先で言語化させる
+                    analysis_prompt = (
+                        "Provide a professional Stable Diffusion prompt description. PRIORITY:\n"
+                        "1. BACKGROUND & ENVIRONMENT: Describe the exact location (e.g., outdoor park, concrete wall, stone bench), floor texture, and background objects (bushes, trees).\n"
+                        "2. OUTFIT: Exact details of clothing (e.g., blue striped dress, buttons, fabric).\n"
+                        "3. LIGHTING & ANGLE: Natural sunlight, high/low angle, and atmosphere.\n"
+                        "Focus on the setting as much as the person."
+                    )
+                    res_context = call_grok_api([{"role":"user","content":[{"type":"text","text":analysis_prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}}]}])
                     context = res_context
                     display_img = item['content'].getvalue()
                     is_image_mode = True
@@ -150,13 +157,14 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
                 if face_hidden: extras.append("face hidden, focused on body")
                 bust_ins = "Flat chest" if bust_type == "貧乳" else ("Large bust" if bust_type == "豊満" else "")
 
-                # 【重要】画像モードなら露出レベルで「上書き」せず、解析結果を尊重する
                 if is_image_mode:
+                    # 背景を「MANDATORY（必須条件）」として固定する指示
                     instruction_content = (
                         f"Target Subject: {st.session_state.char_description}, "
-                        f"Image Details (REPRODUCE FAITHFULLY): {context}, "
+                        f"MANDATORY ENVIRONMENT: {context}, "
                         f"Body: {bust_ins}, Extras: {', '.join(extras)}, Quality: {quality}. "
-                        "Task: Merge the Subject description into the Image Details. Keep the outfit and atmosphere from the Image Details exactly as described."
+                        "CRITICAL: Keep the exact background, location, and setting described in 'MANDATORY ENVIRONMENT'. "
+                        "Do NOT change the outdoor bench, wall, or greenery. Replicate the atmosphere perfectly."
                     )
                 else:
                     instruction_content = (
@@ -178,3 +186,12 @@ if st.button("🚀 全てのプロンプトを一括生成", type="primary", use
                 if display_img: st.image(display_img, width=200)
                 st.code(final_p)
                 st.text_area(f"Copy {i+1}", value=final_p, height=100, key=f"copy_{i}_{random.randint(0,99999)}")
+
+# --- 履歴 ---
+if st.session_state.prompt_history:
+    st.markdown("---")
+    st.markdown("### 🕒 生成履歴（最新10件）")
+    for idx, hist in enumerate(reversed(st.session_state.prompt_history[-10:])):
+        with st.expander(f"履歴 {len(st.session_state.prompt_history) - idx}"):
+            if hist["image"]: st.image(hist["image"], width=150)
+            st.text_area("プロンプト", value=hist["prompt"], height=100, key=f"hist_txt_{idx}")
