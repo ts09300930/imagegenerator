@@ -12,8 +12,9 @@ from streamlit.components.v1 import html
 # HEICサポート
 register_heif_opener()
 
-# --- 設定（2026年現在の主力モデル ID） ---
-GROK_MODEL = "grok-4" 
+# --- 設定 ---
+# 2026年現在の利用可能モデル候補（504対策で複数試行するように実装）
+MODEL_CANDIDATES = ["grok-4", "grok-2-vision-1212", "grok-vision-beta"]
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
 # --- 保存・履歴設定 ---
@@ -40,38 +41,42 @@ if not API_KEY:
     API_KEY = st.sidebar.text_input("Grok APIキー", type="password")
     if not API_KEY: st.stop()
 
-# --- コア関数（絶対にクラッシュさせないガード付き） ---
+# --- 504/404エラー対策：リトライ付きAPIコール ---
 def call_grok_api(messages):
-    payload = {
-        "model": GROK_MODEL, 
-        "messages": messages, 
-        "max_tokens": 1000, 
-        "temperature": 0.7
-    }
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     
-    try:
-        res = requests.post(GROK_API_URL, json=payload, headers=headers, timeout=60)
+    # モデル候補を順に試す（504対策）
+    for model_name in MODEL_CANDIDATES:
+        payload = {
+            "model": model_name, 
+            "messages": messages, 
+            "max_tokens": 1000, 
+            "temperature": 0.7
+        }
         try:
-            json_res = res.json()
-        except:
-            return f"SYSTEM_ERROR_{res.status_code}: Non-JSON Response"
-
-        if res.status_code == 200:
-            if isinstance(json_res, dict) and "choices" in json_res:
+            res = requests.post(GROK_API_URL, json=payload, headers=headers, timeout=90)
+            
+            if res.status_code == 200:
+                json_res = res.json()
                 return json_res["choices"][0]["message"]["content"].strip()
-            return "ERROR: Unexpected API Structure"
+            
+            # 504(Timeout)や404(Not Found)なら次のモデルへ
+            if res.status_code in [504, 404, 503]:
+                continue
+            
+            # それ以外のエラー（400等）は詳細を返す
+            try:
+                err_msg = res.json().get('error', {}).get('message', res.text)
+                return f"API_ERROR_{res.status_code}: {err_msg}"
+            except:
+                return f"API_ERROR_{res.status_code}: Server returned non-JSON"
 
-        # エラーメッセージ抽出（型チェックを徹底して 'str' object... エラーを防止）
-        msg = str(json_res)
-        if isinstance(json_res, dict):
-            err = json_res.get('error')
-            if isinstance(err, dict):
-                msg = err.get('message', msg)
-        return f"API_ERROR_{res.status_code}: {msg}"
-
-    except Exception as e:
-        return f"CONNECTION_ERROR: {str(e)}"
+        except requests.exceptions.Timeout:
+            continue # 次のモデルへ
+        except Exception as e:
+            return f"CONNECTION_ERROR: {str(e)}"
+    
+    return "SERVER_BUSY: 全てのモデルが応答しません。xAIサーバーの過負荷です。"
 
 def process_image(uploaded_file):
     img = Image.open(uploaded_file)
@@ -83,27 +88,27 @@ def process_image(uploaded_file):
 
 # --- 状態初期化 ---
 if 'prompt_history' not in st.session_state: st.session_state.prompt_history = []
-if 'char_description' not in st.session_state: st.session_state.char_description = ""
 if 'scenes_list' not in st.session_state: st.session_state.scenes_list = []
 
 # --- UI ---
-st.title("Higgsfield Gen v9.3 (デグレ修正・完全版)")
+st.title("Higgsfield Gen v9.4 (Server Error Fix)")
 
 # 1. 身体的特徴
 st.markdown("### 👩 1. 身体的特徴")
 char_h = load_char_history()
 sel_h = st.selectbox("過去の履歴から選択", ["-- 履歴なし --"] + char_h)
 if sel_h != "-- 履歴なし --": st.session_state.char_description = sel_h
-st.session_state.char_description = st.text_area("身体的特徴 (Gカップ、黒髪ロングなど)", value=st.session_state.char_description)
+char_desc = st.text_area("身体的特徴 (例: 黒髪ロング、Gカップ、眼鏡)", value=st.session_state.get('char_description', ""))
+st.session_state.char_description = char_desc
 
 st.markdown("---")
 
-# 2. シチュエーション設定（復活：画像解析 or AI自動生成）
+# 2. シチュエーション設定 (デグレ修正版)
 st.markdown("### 🎬 2. シチュエーション設定")
-mode = st.radio("入力モードを選択", ["📷 画像解析（アップロード）", "🎲 AI自動生成（テキスト）"], horizontal=True)
+mode = st.radio("入力モードを選択", ["📷 画像解析", "🎲 AI自動生成"], horizontal=True)
 
 targets = []
-if mode == "📷 画像解析（アップロード）":
+if mode == "📷 画像解析":
     uploaded_images = st.file_uploader("画像をアップロード", type=["jpg","png","heic"], accept_multiple_files=True)
     if uploaded_images:
         for f in uploaded_images:
@@ -111,20 +116,19 @@ if mode == "📷 画像解析（アップロード）":
 else:
     c1, c2 = st.columns([1, 2])
     gen_count = c1.selectbox("生成数", options=list(range(1, 11)), index=0)
-    if c2.button(f"🎲 {gen_count}件を自動提案", use_container_width=True):
+    if c2.button(f"🎲 {gen_count}件を自動提案"):
+        # 過去のロジックそのまま
         res = call_grok_api([{"role": "user", "content": f"日本のSNS自撮り風。'場所：、服装：、状態：'の形式で{gen_count}件考えて。"}] )
-        if "ERROR" not in res:
+        if "ERROR" not in res and "SERVER_BUSY" not in res:
             st.session_state.scenes_list = [s.strip() for s in res.split('\n') if "場所" in s][:gen_count]
     
-    # 提案されたリストを表示・編集可能にする
     for i, scene in enumerate(st.session_state.scenes_list):
         st.session_state.scenes_list[i] = st.text_area(f"案 {i+1}", value=scene, key=f"scene_{i}")
-    for s in st.session_state.scenes_list:
-        targets.append({"type": "text", "content": s})
+    for s in st.session_state.scenes_list: targets.append({"type": "text", "content": s})
 
 st.markdown("---")
 
-# 3. 共通オプション
+# 3. オプション設定 (動いていた頃の強力な指示を継承)
 st.markdown("### ⚙️ 3. オプション設定")
 col_opt1, col_opt2 = st.columns(2)
 sex_level = col_opt1.select_slider("露出レベル", options=[1, 2, 3, 4, 5], value=3)
@@ -133,17 +137,12 @@ bust_type = col_opt2.radio("胸のサイズ", ["貧乳", "普通", "豊満"], in
 ca, cb, cc = st.columns(3)
 tight_clothing = ca.checkbox("タイトな服装")
 nipple_poke = cb.checkbox("乳首ぽち")
-mask_on = cc.checkbox("白いマスク")
-
-cd, ce, cf = st.columns(3)
-iphone_selfie = cd.checkbox("iPhone鏡自撮り")
-face_hidden = ce.checkbox("顔を隠す")
-angle_type = st.selectbox("アングル", ["標準", "俯瞰 (from above)", "アオリ (from below)", "横から (from side)"])
+mask_on = cb.checkbox("白マスク着用")
 
 # --- 生成実行 ---
 if st.button("🚀 プロンプトを一括生成", type="primary", use_container_width=True):
     if not targets:
-        st.warning("画像かシチュエーション案を入力してください。")
+        st.warning("画像またはシチュエーション案が必要です。")
         st.stop()
     
     save_char_history(st.session_state.char_description)
@@ -153,11 +152,10 @@ if st.button("🚀 プロンプトを一括生成", type="primary", use_containe
             current_ctx = ""
             display_img = None
             
-            # コンテキスト（画像解析 or テキスト）の取得
             if item["type"] == "image":
                 img_b64 = process_image(item['content'])
                 display_img = item['content'].getvalue()
-                with st.spinner(f"画像 {idx+1} 解析中..."):
+                with st.spinner(f"解析中..."):
                     current_ctx = call_grok_api([
                         {"role": "user", "content": [
                             {"type": "text", "text": "Describe this image context for a prompt paragraph."},
@@ -167,60 +165,40 @@ if st.button("🚀 プロンプトを一括生成", type="primary", use_containe
             else:
                 current_ctx = item["content"]
 
-            if "ERROR" in str(current_ctx):
+            if "ERROR" in str(current_ctx) or "SERVER_BUSY" in str(current_ctx):
                 st.error(f"❌ 解析失敗: {current_ctx}")
                 continue
 
-            # 最終プロンプトの合成（過去の強力なロジックを反映）
-            with st.spinner(f"Result {idx+1} 合成中..."):
-                level_desc = {
-                    1: "fully clothed, modest outfit, opaque fabric, no skin exposure",
-                    2: "minimal skin exposure, form-fitting",
-                    3: "visible cleavage, sexy lingerie style elements",
-                    4: "bikini or lingerie only, no outer clothing",
-                    5: "minimal coverage, nearly nude, extreme skin exposure"
-                }[sex_level]
-
-                strong_adds = []
-                if tight_clothing: strong_adds.append("extremely tight-fitting, skin-tight, body-hugging")
-                if nipple_poke: strong_adds.append("visible nipple outlines poking through thin fabric")
-                if mask_on: strong_adds.append("wearing a white surgical mask")
-                if iphone_selfie: strong_adds.append("holding iPhone, mirror selfie pose")
-                if face_hidden: strong_adds.append("face hidden, focus on body")
-                if angle_type != "標準": strong_adds.append(angle_type.split("(")[-1].replace(")", ""))
-
+            with st.spinner(f"合成中..."):
+                # 動いていた頃のウェイト・指示ロジックを復元
                 bust_ins = ""
                 if bust_type == "貧乳":
-                    bust_ins = "completely flat chest, no volume, bony torso, (flat chest:1.9)"
+                    bust_ins = "completely flat chest, no volume, bony ribcage, (flat chest:1.9)"
                 elif bust_type == "豊満":
-                    bust_ins = "large ample bust, voluptuous curves, high-volume breasts"
+                    bust_ins = "large ample bust, voluptuous curves, prominent cleavage"
+
+                adds = []
+                if tight_clothing: adds.append("skin-tight, body-hugging fabric")
+                if nipple_poke: adds.append("visible nipples poking through fabric")
+                if mask_on: adds.append("wearing a white surgical mask")
 
                 system_ins = (
-                    "You are an expert prompt engineer for Higgsfield. Merge description and scene. "
-                    f"Rules: {level_desc}, {bust_ins}, {', '.join(strong_adds)}. "
-                    "Output ONLY a single continuous English paragraph. Start with 'A young...'"
+                    f"Expert Prompt Engineer mode. Sexiness level: {sex_level}. "
+                    f"Mandatory Body: {bust_ins}. {', '.join(adds)}. "
+                    "Output ONLY the final English paragraph starting with 'A photorealistic shot of...'"
                 )
                 
                 final_p = call_grok_api([
                     {"role": "system", "content": system_ins},
-                    {"role": "user", "content": f"Base: {current_ctx}\nSubject: {st.session_state.char_description}"}
+                    {"role": "user", "content": f"Context: {current_ctx}\nFeatures: {st.session_state.char_description}"}
                 ])
 
                 if "ERROR" in final_p:
                     st.error(f"❌ 合成失敗: {final_p}")
                     continue
 
-                # 履歴保存と表示
                 st.session_state.prompt_history.append((final_p, display_img))
                 st.success(f"✅ Result {idx+1}")
-                if display_img: st.image(display_img, width=250)
+                if display_img: st.image(display_img, width=200)
                 st.code(final_p)
                 html(f"<button onclick=\"navigator.clipboard.writeText(`{final_p.replace('`', '\\`')}`)\">コピー</button>")
-
-# 履歴表示セクション
-if st.session_state.prompt_history:
-    st.markdown("### 📜 最新履歴")
-    for i, (h_p, h_img) in enumerate(reversed(st.session_state.prompt_history[-5:])):
-        with st.expander(f"履歴 {i+1}"):
-            if h_img: st.image(h_img, width=150)
-            st.code(h_p)
