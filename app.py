@@ -14,8 +14,9 @@ register_heif_opener()
 # ====================== 設定 ======================
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
-CHAR_HISTORY_FILE = os.path.join(DATA_DIR, "char_history_v10.csv")
+CHAR_HISTORY_FILE = os.path.join(DATA_DIR, "char_history_v11.csv")
 
+# 2026年最新モデルを優先
 MODEL_PRIORITY = ["grok-4", "grok-2-vision-1212", "grok-vision-beta"]
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 
@@ -37,7 +38,7 @@ def save_char_history(char: str):
     history.insert(0, char)
     pd.DataFrame({"char_desc": history[:100]}).to_csv(CHAR_HISTORY_FILE, index=False)
 
-def call_grok_api(messages: list, temperature: float = 0.7, max_tokens: int = 1000) -> str:
+def call_grok_api(messages: list, temperature: float = 0.7, max_tokens: int = 1200) -> str:
     api_key = os.environ.get("XAI_API_KEY")
     if not api_key:
         api_key = st.session_state.get("api_key")
@@ -57,231 +58,161 @@ def call_grok_api(messages: list, temperature: float = 0.7, max_tokens: int = 10
         }
         try:
             res = requests.post(GROK_API_URL, json=payload, headers=headers, timeout=90)
-
             if res.status_code == 200:
-                try:
-                    return res.json()["choices"][0]["message"]["content"].strip()
-                except Exception:
-                    continue
-
-            if res.status_code >= 500 or res.status_code in (404, 429):
-                last_error = f"{model_name} failed ({res.status_code})"
-                continue
-
-            try:
-                msg = res.json().get('error', {}).get('message', res.text)
-                return f"API_ERROR_{res.status_code}: {msg}"
-            except Exception:
-                return f"API_ERROR_{res.status_code}: {res.text[:150]}"
-
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-            last_error = f"Timeout on {model_name}"
+                return res.json()["choices"][0]["message"]["content"].strip()
+            last_error = f"{model_name} failed ({res.status_code})"
+        except Exception as e:
+            last_error = str(e)
             continue
-
-    return f"❌ サーバー混雑中: 全てのモデルが応答しませんでした。({last_error})"
+    return f"❌ エラー: {last_error}"
 
 def process_image(uploaded_file):
     img = Image.open(uploaded_file)
     if img.mode != 'RGB':
         img = img.convert('RGB')
-    img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+    img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
     buffered = io.BytesIO()
     img.save(buffered, format="JPEG", quality=85, optimize=True)
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 # ====================== UI ======================
-st.title("Higgsfield Gen v10.2 (露出0 超強化版)")
+st.set_page_config(page_title="Higgsfield Gen v11.0", layout="wide")
+st.title("📸 Higgsfield Gen v11.0 (Date-style Edition)")
+st.caption("note戦略準拠：露出0 × iPhoneリアリティ × 彼氏目線構図")
 
 # APIキー
 if "api_key" not in st.session_state:
     st.session_state.api_key = os.environ.get("XAI_API_KEY", "")
-
 if not st.session_state.api_key:
     st.session_state.api_key = st.sidebar.text_input("Grok APIキー", type="password")
-    if not st.session_state.api_key:
-        st.stop()
+    if not st.session_state.api_key: st.stop()
 
 # 1. 身体的特徴
-st.markdown("### 👩 1. 身体的特徴")
-char_h = load_char_history()
-sel_h = st.selectbox("履歴から選択", ["-- 履歴なし --"] + char_h)
+with st.sidebar:
+    st.markdown("### 👩 1. 身体的特徴")
+    char_h = load_char_history()
+    sel_h = st.selectbox("履歴から選択", ["-- 履歴なし --"] + char_h)
+    if sel_h != "-- 履歴なし --":
+        st.session_state.char_description = sel_h
 
-if sel_h != "-- 履歴なし --":
-    st.session_state.char_description = sel_h
-
-char_description = st.text_area(
-    "身体的特徴",
-    value=st.session_state.get('char_description', ""),
-    height=120
-)
-st.session_state.char_description = char_description
-
-if st.button("履歴に保存"):
-    save_char_history(char_description)
-    st.success("保存しました")
-
-st.markdown("---")
+    char_description = st.text_area(
+        "身体的特徴 (例: 20代中盤の日本人女性、黒髪ボブ、薄いメイク)",
+        value=st.session_state.get('char_description', ""),
+        height=150
+    )
+    st.session_state.char_description = char_description
+    if st.button("履歴に保存"):
+        save_char_history(char_description)
+        st.success("保存完了")
 
 # 2. シチュエーション設定
-st.markdown("### 🎬 2. 設定モード")
-mode = st.radio("入力モード", ["📷 画像解析", "🎲 AI自動生成"], horizontal=True)
+col_main, col_opt = st.columns([2, 1])
 
-targets = []
+with col_main:
+    st.markdown("### 🎬 2. シチュエーション設定")
+    mode = st.radio("入力モード", ["📷 画像からデート風に変換", "🎲 デートプラン自動生成"], horizontal=True)
 
-if mode == "📷 画像解析":
-    uploaded_images = st.file_uploader(
-        "画像アップロード（複数可）",
-        type=["jpg", "jpeg", "png", "heic"],
-        accept_multiple_files=True
-    )
-    if uploaded_images:
-        for f in uploaded_images:
-            targets.append({"type": "image", "content": f})
+    targets = []
+    if mode == "📷 画像からデート風に変換":
+        uploaded_images = st.file_uploader("参考画像（アングルや服装の参考にします）", type=["jpg", "jpeg", "png", "heic"], accept_multiple_files=True)
+        if uploaded_images:
+            for f in uploaded_images:
+                targets.append({"type": "image", "content": f})
+    else:
+        c1, c2 = st.columns([1, 2])
+        gen_count = c1.selectbox("生成数", options=list(range(1, 6)), index=2)
+        if c2.button(f"🎲 デート案を{gen_count}件生成"):
+            with st.spinner("AIがデートプランを考案中..."):
+                res = call_grok_api([{
+                    "role": "user",
+                    "content": f"2026年のトレンドを反映した、露出なしでバズる『デート風AI美女』のシチュエーションを{gen_count}件提案して。場所・服装・日常的な動作（カフェで注文中など）を日本語で。"
+                }])
+                if "❌" not in res:
+                    st.session_state.scenes_list = [s.strip() for s in res.split('\n') if s.strip()][:gen_count]
+                    st.rerun()
 
-else:
-    c1, c2 = st.columns([1, 2])
-    gen_count = c1.selectbox("生成数", options=list(range(1, 11)), index=2)
-   
-    if c2.button(f"🎲 {gen_count}件を自動生成"):
-        with st.spinner("生成中..."):
-            res = call_grok_api([{
-                "role": "user",
-                "content": f"日本のSNS自撮り風のシチュエーションを{gen_count}件提案してください。各案を場所・服装・状態の観点で簡潔に記述。"
-            }])
-            if "❌" not in res and "ERROR" not in res:
-                st.session_state.scenes_list = [s.strip() for s in res.split('\n') if s.strip()][:gen_count]
-                st.rerun()
+        scenes = st.session_state.get('scenes_list', [])
+        for i, scene in enumerate(scenes):
+            scenes[i] = st.text_area(f"デート案 {i+1}", value=scene, key=f"scene_{i}")
+            if scenes[i].strip():
+                targets.append({"type": "text", "content": scenes[i]})
 
-    scenes = st.session_state.get('scenes_list', [])
-    for i, scene in enumerate(scenes):
-        scenes[i] = st.text_area(f"案 {i+1}", value=scene, key=f"scene_{i}")
-   
-    for s in scenes:
-        if s.strip():
-            targets.append({"type": "text", "content": s})
-
-st.markdown("---")
-
-# 3. オプション設定
-st.markdown("### ⚙️ 3. オプション設定")
-col1, col2 = st.columns(2)
-sex_level = col1.select_slider("露出レベル", options=[1, 2, 3, 4, 5], value=3)
-bust_type = col2.radio("胸のサイズ", ["貧乳", "普通", "豊満"], index=1, horizontal=True)
-
-photo_real_mode = st.checkbox("✅ リアルな写真風プロンプトにする（Photorealisticモード）", value=False)
-safe_mode = st.checkbox("✅ 露出を完全に抑える（露出度0） — 谷間・胸の強調・透けなどを強力に排除", value=False)
-
-ca, cb, cc = st.columns(3)
-tight_clothing = ca.checkbox("タイトな服装", disabled=safe_mode)
-nipple_poke = cb.checkbox("乳首ぽち", disabled=safe_mode)
-mask_on = cc.checkbox("白いマスク")
+with col_opt:
+    st.markdown("### ⚙️ 3. note戦略オプション")
+    date_vibe = st.checkbox("💖 彼氏目線モード (Boyfriend Lens)", value=True, help="『彼氏が向かいから撮った』ような構図と雰囲気を追加")
+    iphone_real = st.checkbox("📱 iPhone 16 Pro 質感", value=True, help="毛穴、産毛、光の透過、HDR感を追加")
+    clean_strategy = st.checkbox("🛡️ 露出0 (クリーン戦略)", value=True, help="2:1の素肌比率を遵守。露出を完全に排除")
+    
+    bust_size = st.select_slider("胸の存在感", options=["控えめ", "標準", "強調なし"], value="標準")
+    lighting = st.selectbox("光の演出", ["自然な窓の光 (5500K)", "夕方のゴールデンアワー", "バーの琥珀色ライト", "街灯のミックス光"])
 
 # ====================== 生成処理 ======================
-if st.button("🚀 プロンプトを一括生成", type="primary", use_container_width=True):
+if st.button("🚀 note戦略に基づいたプロンプトを一括生成", type="primary", use_container_width=True):
     if not targets:
-        st.warning("画像またはテキストを少なくとも1つ入力してください。")
+        st.warning("画像またはテキストを入力してください。")
         st.stop()
-
-    save_char_history(char_description)
 
     for idx, item in enumerate(targets):
         with st.container():
             current_ctx = ""
-            display_img = None
-
             if item["type"] == "image":
                 img_b64 = process_image(item['content'])
-                display_img = item['content'].getvalue()
                 with st.spinner(f"画像 {idx+1} 解析中..."):
                     current_ctx = call_grok_api([
                         {"role": "user", "content": [
-                            {"type": "text", "text": "Describe the setting, outfit, pose, and background in one concise English paragraph."},
+                            {"type": "text", "text": "Extract only the setting, outfit (describe as modest), and pose. Concise paragraph."},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
                         ]}
                     ])
             else:
                 current_ctx = item["content"]
 
-            if "❌" in str(current_ctx) or "ERROR" in str(current_ctx):
-                st.error(current_ctx)
-                continue
+            # システムプロンプトの構築（noteの知見を全投入）
+            sys_parts = [
+                "You are an expert prompt engineer for 'Date-style AI photography'.",
+                "Output ONLY a single detailed natural language paragraph in English.",
+                "NO tags, NO lists, NO explanations."
+            ]
 
-            with st.spinner("最終プロンプト合成中..."):
-                # 胸の記述（安全モード時は控えめ固定）
-                if safe_mode:
-                    bust_ins = "modest bust, average chest size, no breast emphasis"
-                else:
-                    bust_ins = "(flat chest:1.9), petite bony torso" if bust_type == "貧乳" else \
-                               ("large ample bust, voluptuous curves" if bust_type == "豊満" else "")
-
-                adds = []
-                if tight_clothing and not safe_mode:
-                    adds.append("extremely tight-fitting")
-                if nipple_poke and not safe_mode:
-                    adds.append("visible nipples poking through fabric")
-                if mask_on:
-                    adds.append("wearing a white surgical mask")
-
-                # リアル写真モード
-                style_instruction = (
-                    "photorealistic, raw smartphone photo, natural lighting, casual mirror selfie style, "
-                    "slight grain, realistic skin texture, 8k raw photo, shot on iPhone, natural pose, "
-                    "unfiltered, documentary style" if photo_real_mode else ""
+            # iPhoneリアリティの注入
+            if iphone_real:
+                sys_parts.append(
+                    "Style: Shot on iPhone 16 Pro, 24mm or 48mm lens. Computational photography look. "
+                    "Incorporate natural skin texture with visible pores, subtle blemishes, and faint under-eye circles. "
+                    "Hair should have natural flyaways and loose strands catching the light. "
+                    "Apply slight smart HDR processing and subtle sensor noise in shadows."
                 )
 
-                # ====================== 露出0 超強力指示 ======================
-                if safe_mode:
-                    safe_instruction = (
-                        "strictly modest clothing, conservative outfit, fully covered body, high neckline, "
-                        "no cleavage, no deep neckline, no plunging neckline, no underboob, no sideboob, "
-                        "no visible breast contour, no emphasized breasts, no breast focus, breasts not prominent, "
-                        "no exposed chest skin, no valley between breasts, completely flat chest appearance, "
-                        "no see-through fabric, no sheer clothing, no wet clothing, no tight clothing revealing shape, "
-                        "no upskirt, no short skirt with excessive thigh exposure, no suggestive clothing, "
-                        "safe for work, sfw, completely non-sexual, modest and proper attire, fully clothed, "
-                        "no erotic elements whatsoever. "
-                        "(cleavage:1.9), (deep cleavage:1.9), (underboob:1.9), (visible nipples:1.9), "
-                        "(exposed breasts:1.9), (breast emphasis:1.9), (suggestive pose:1.8) — "
-                        "ABSOLUTELY AVOID ALL OF THE ABOVE. MUST strictly enforce modesty."
-                    )
-                    effective_sex_level = 0
-                else:
-                    safe_instruction = ""
-                    effective_sex_level = sex_level
-
-                system_content = (
-                    f"You are a professional prompt engineer for safe AI image generation. "
-                    f"Sexiness level: {effective_sex_level}/5 (0 = completely modest and non-erotic). "
-                    f"{bust_ins}. "
-                    f"Additional descriptors: {', '.join(adds) if adds else 'none'}. "
-                    f"{style_instruction}. "
-                    f"{safe_instruction}. "
-                    "CRITICAL: If safe_mode is enabled, you MUST output only modest, conservative, and fully covered clothing. "
-                    "Never generate any revealing, sexy, or suggestive elements. "
-                    "Output ONLY a single, detailed, well-structured English paragraph. "
-                    "Do not add explanations or extra text."
+            # クリーン戦略
+            if clean_strategy:
+                sys_parts.append(
+                    "Clothing: Strictly modest and conservative. Adhere to the '2:1 skin ratio' (hide most skin except face/wrists/ankles). "
+                    "Oversized knits, high necklines, or coats are preferred. "
+                    "ABSOLUTELY AVOID: cleavage, chest emphasis, suggestive poses, swimwear, or revealing clothes. "
+                    f"Bust description: {bust_size} and natural, no emphasis."
                 )
 
+            # 彼氏目線
+            if date_vibe:
+                sys_parts.append(
+                    "Composition: The photo must feel spontaneous and intimate, 'as if her boyfriend quietly took this photo' "
+                    "during a real date. Focus on unposed, candid moments and genuine expressions."
+                )
+
+            sys_parts.append(f"Lighting: {lighting}.")
+
+            with st.spinner("プロンプト合成中..."):
                 final_p = call_grok_api([
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": f"Scene: {current_ctx}\nSubject: {char_description}"}
+                    {"role": "system", "content": " ".join(sys_parts)},
+                    {"role": "user", "content": f"Scene Context: {current_ctx}\nSubject Details: {char_description}"}
                 ])
 
-                if "❌" in str(final_p) or "ERROR" in str(final_p):
-                    st.error(final_p)
-                    continue
-
-                st.success(f"✅ Result {idx+1}")
-                if display_img:
-                    st.image(display_img, width=220)
+                st.success(f"✅ デート風プロンプト {idx+1}")
                 st.code(final_p, language=None)
-
+                
                 # コピーボタン
                 escaped_p = final_p.replace('`', '\\`').replace('$', '\\$')
-                html(f"""
-                <button onclick="navigator.clipboard.writeText(`{escaped_p}`)">
-                    📋 プロンプトをコピー
-                </button>
-                """)
+                html(f"""<button onclick="navigator.clipboard.writeText(`{escaped_p}`)">📋 プロンプトをコピー</button>""")
 
-st.caption("Higgsfield Gen v10.2 — 露出0 超強化版（谷間・胸強調を強力排除）")
+st.markdown("---")
+st.caption("Higgsfield Gen v11.0 | Strategy by note. Model: Grok-4 / Nano Banana Pro Ready")
