@@ -177,49 +177,48 @@ if st.button("🚀 note戦略に基づいたプロンプトを一括生成", typ
             # --- システムプロンプトの構築 ---
             sys_parts = [
                 "You are an expert prompt engineer for 'Date-style AI photography'.",
-                "Output ONLY a single detailed natural language paragraph in English.",
-                "NO tags, NO lists, NO explanations."
+                "Output ONLY the descriptive narrative of the scene and person.",
+                "NO tags, NO lists, NO explanations. Focus on the mood and action."
             ]
 
-            # iPhoneリアリティの注入（AIへの「意識付け」用）
-            if iphone_real:
-                sys_parts.append(
-                    "Incorporate natural skin texture with visible pores, subtle blemishes, and faint under-eye circles. "
-                    "Hair should have natural flyaways and loose strands catching the light. "
-                    "Apply slight smart HDR processing and subtle sensor noise in shadows."
-                )
-
-            # クリーン戦略
+            # 露出0・クリーン戦略（AIに強く意識させる）
             if clean_strategy:
                 sys_parts.append(
-                    "Clothing: Strictly modest and conservative. Adhere to the '2:1 skin ratio'. "
-                    "ABSOLUTELY AVOID: cleavage, chest emphasis, suggestive poses, swimwear, or revealing clothes. "
-                    f"Bust description: {bust_size} and natural."
+                    "Clothing must be strictly modest and conservative. Adhere to the '2:1 skin ratio'. "
+                    "ABSOLUTELY AVOID: cleavage, chest emphasis, suggestive poses, or revealing clothes. "
+                    f"Bust size: {bust_size} and natural."
                 )
 
-            # 彼氏目線
+            # 彼氏目線（AIに構図を意識させる）
             if date_vibe:
                 sys_parts.append(
                     "Composition: 'as if her boyfriend quietly took this photo' during a real date. "
                     "Focus on unposed, candid moments and genuine expressions."
                 )
 
-            sys_parts.append(f"Lighting: {lighting}.")
-
             with st.spinner(f"プロンプト合成中..."):
-                # AIに文章を生成させる
-                final_p = call_grok_api([
+                # まずはAIにシーンの描写を文章で作らせる
+                base_narrative = call_grok_api([
                     {"role": "system", "content": " ".join(sys_parts)},
                     {"role": "user", "content": f"Scene Context: {current_ctx}\nSubject Details: {char_description}"}
                 ])
 
-                # 【物理的修正】チェックが入っている場合、AIの回答に強制的にカメラ情報を結合する
+                # 【物理的修正】noteの①〜⑦のフレーズを強制的に結合する
+                final_p = base_narrative.rstrip('.') + "." # 文末を整える
+
                 if iphone_real:
-                    # 文末に具体的なカメラ設定を追加
-                    camera_suffix = f" Shot on iPhone 16 Pro, 24mm wide lens, {lighting}, f/2.8, shallow depth of field, realistic bokeh, high dynamic range, natural textures."
-                    # 重複を防ぐため、もしAIが既に書いていたら結合しない処理（念のため）
-                    if "iPhone" not in final_p:
-                        final_p = final_p.rstrip('.') + "." + camera_suffix
+                    # noteの①〜⑦のフレーズをそのまま変数化
+                    note_elements = [
+                        "shot on iPhone 16 Pro, 24mm wide lens", # ①
+                        f"{lighting}, soft natural window light from the left, color temperature around 5500K", # ②
+                        "natural skin with visible pores, subtle blemishes, faint under-eye circles", # ③
+                        "hair with natural flyaways and loose strands catching the backlight", # ④
+                        "slightly wrinkled linen blouse with natural fabric drape", # ⑤
+                        "shallow depth of field, f/2.8, background softly blurred with recognizable bokeh shapes", # ⑥
+                        "slight iPhone HDR processing, subtle vignette at corners, faint sensor noise in shadows" # ⑦
+                    ]
+                    # 文章の後に、これらの要素を「, 」で繋いで強制追加
+                    final_p += " " + ", ".join(note_elements) + "."
 
                 # 【画面出力】
                 st.success(f"✅ デート風プロンプト {idx+1}")
