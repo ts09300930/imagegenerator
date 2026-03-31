@@ -70,15 +70,16 @@ def process_image(uploaded_file):
     img = Image.open(uploaded_file)
     if img.mode != 'RGB':
         img = img.convert('RGB')
-    img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+    # 解析用なので少し小さめに縮小（トークン節約）
+    img.thumbnail((800, 800), Image.Resampling.LANCZOS)
     buffered = io.BytesIO()
     img.save(buffered, format="JPEG", quality=85, optimize=True)
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 # ====================== UI ======================
-st.set_page_config(page_title="Higgsfield Gen v11.0", layout="wide")
-st.title("📸 Higgsfield Gen v11.0 (Date-style Edition)")
-st.caption("note戦略準拠：露出0 × iPhoneリアリティ × 彼氏目線構図")
+st.set_page_config(page_title="Higgsfield Gen v11.1", layout="wide")
+st.title("📸 Higgsfield Gen v11.1 (Date-style with Reference View)")
+st.caption("note戦略準拠：露出0 × iPhoneリアリティ × 彼氏目線構図 × 参考画像表示")
 
 # APIキー
 if "api_key" not in st.session_state:
@@ -154,9 +155,15 @@ if st.button("🚀 note戦略に基づいたプロンプトを一括生成", typ
 
     for idx, item in enumerate(targets):
         with st.container():
+            st.markdown("---")
             current_ctx = ""
+            display_img = None
+            ref_text = ""
+
             if item["type"] == "image":
+                # 【復元ポイント】アップロード画像をプレビュー用に保持
                 img_b64 = process_image(item['content'])
+                display_img = item['content'].getvalue() 
                 with st.spinner(f"画像 {idx+1} 解析中..."):
                     current_ctx = call_grok_api([
                         {"role": "user", "content": [
@@ -166,6 +173,7 @@ if st.button("🚀 note戦略に基づいたプロンプトを一括生成", typ
                     ])
             else:
                 current_ctx = item["content"]
+                ref_text = item["content"] # テキストモード用の参考テキスト
 
             # システムプロンプトの構築（noteの知見を全投入）
             sys_parts = [
@@ -201,18 +209,28 @@ if st.button("🚀 note戦略に基づいたプロンプトを一括生成", typ
 
             sys_parts.append(f"Lighting: {lighting}.")
 
-            with st.spinner("プロンプト合成中..."):
+            with st.spinner(f"デート風プロンプト {idx+1} 合成中..."):
                 final_p = call_grok_api([
                     {"role": "system", "content": " ".join(sys_parts)},
                     {"role": "user", "content": f"Scene Context: {current_ctx}\nSubject Details: {char_description}"}
                 ])
 
+                # 【画面出力】参考と結果を並べて表示
                 st.success(f"✅ デート風プロンプト {idx+1}")
-                st.code(final_p, language=None)
-                
-                # コピーボタン
-                escaped_p = final_p.replace('`', '\\`').replace('$', '\\$')
-                html(f"""<button onclick="navigator.clipboard.writeText(`{escaped_p}`)">📋 プロンプトをコピー</button>""")
+                col_ref, col_res = st.columns([1, 3])
+
+                with col_ref:
+                    # 画像モードなら画像、テキストモードならデート案テキストを表示
+                    if display_img:
+                        st.image(display_img, caption="参考画像（アングル・服装）", width=180)
+                    else:
+                        st.info(f"参考デート案:\n\n{ref_text}")
+
+                with col_res:
+                    st.code(final_p, language=None)
+                    # コピーボタン
+                    escaped_p = final_p.replace('`', '\\`').replace('$', '\\$')
+                    html(f"""<button onclick="navigator.clipboard.writeText(`{escaped_p}`)">📋 プロンプトをコピー</button>""")
 
 st.markdown("---")
-st.caption("Higgsfield Gen v11.0 | Strategy by note. Model: Grok-4 / Nano Banana Pro Ready")
+st.caption("Higgsfield Gen v11.1 | Strategy by note. Model: Grok-4 / Nano Banana Pro Ready")
