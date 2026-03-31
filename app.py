@@ -161,31 +161,29 @@ if st.button("🚀 note戦略に基づいたプロンプトを一括生成", typ
             ref_text = ""
 
             if item["type"] == "image":
-                # 【復元ポイント】アップロード画像をプレビュー用に保持
                 img_b64 = process_image(item['content'])
                 display_img = item['content'].getvalue() 
                 with st.spinner(f"画像 {idx+1} 解析中..."):
                     current_ctx = call_grok_api([
                         {"role": "user", "content": [
-                            {"type": "text", "text": "Extract only the setting, outfit (describe as modest), and pose. Concise paragraph."},
+                            {"type": "text", "text": "Describe the setting, outfit, and pose in one concise paragraph."},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
                         ]}
                     ])
             else:
                 current_ctx = item["content"]
-                ref_text = item["content"] # テキストモード用の参考テキスト
+                ref_text = item["content"]
 
-            # システムプロンプトの構築（noteの知見を全投入）
+            # --- システムプロンプトの構築 ---
             sys_parts = [
                 "You are an expert prompt engineer for 'Date-style AI photography'.",
                 "Output ONLY a single detailed natural language paragraph in English.",
                 "NO tags, NO lists, NO explanations."
             ]
 
-            # iPhoneリアリティの注入
+            # iPhoneリアリティの注入（AIへの「意識付け」用）
             if iphone_real:
                 sys_parts.append(
-                    "Style: Shot on iPhone 16 Pro, 24mm or 48mm lens. Computational photography look. "
                     "Incorporate natural skin texture with visible pores, subtle blemishes, and faint under-eye circles. "
                     "Hair should have natural flyaways and loose strands catching the light. "
                     "Apply slight smart HDR processing and subtle sensor noise in shadows."
@@ -194,43 +192,49 @@ if st.button("🚀 note戦略に基づいたプロンプトを一括生成", typ
             # クリーン戦略
             if clean_strategy:
                 sys_parts.append(
-                    "Clothing: Strictly modest and conservative. Adhere to the '2:1 skin ratio' (hide most skin except face/wrists/ankles). "
-                    "Oversized knits, high necklines, or coats are preferred. "
+                    "Clothing: Strictly modest and conservative. Adhere to the '2:1 skin ratio'. "
                     "ABSOLUTELY AVOID: cleavage, chest emphasis, suggestive poses, swimwear, or revealing clothes. "
-                    f"Bust description: {bust_size} and natural, no emphasis."
+                    f"Bust description: {bust_size} and natural."
                 )
 
             # 彼氏目線
             if date_vibe:
                 sys_parts.append(
-                    "Composition: The photo must feel spontaneous and intimate, 'as if her boyfriend quietly took this photo' "
-                    "during a real date. Focus on unposed, candid moments and genuine expressions."
+                    "Composition: 'as if her boyfriend quietly took this photo' during a real date. "
+                    "Focus on unposed, candid moments and genuine expressions."
                 )
 
             sys_parts.append(f"Lighting: {lighting}.")
 
-            with st.spinner(f"デート風プロンプト {idx+1} 合成中..."):
+            with st.spinner(f"プロンプト合成中..."):
+                # AIに文章を生成させる
                 final_p = call_grok_api([
                     {"role": "system", "content": " ".join(sys_parts)},
                     {"role": "user", "content": f"Scene Context: {current_ctx}\nSubject Details: {char_description}"}
                 ])
 
-                # 【画面出力】参考と結果を並べて表示
+                # 【物理的修正】チェックが入っている場合、AIの回答に強制的にカメラ情報を結合する
+                if iphone_real:
+                    # 文末に具体的なカメラ設定を追加
+                    camera_suffix = f" Shot on iPhone 16 Pro, 24mm wide lens, {lighting}, f/2.8, shallow depth of field, realistic bokeh, high dynamic range, natural textures."
+                    # 重複を防ぐため、もしAIが既に書いていたら結合しない処理（念のため）
+                    if "iPhone" not in final_p:
+                        final_p = final_p.rstrip('.') + "." + camera_suffix
+
+                # 【画面出力】
                 st.success(f"✅ デート風プロンプト {idx+1}")
                 col_ref, col_res = st.columns([1, 3])
 
                 with col_ref:
-                    # 画像モードなら画像、テキストモードならデート案テキストを表示
                     if display_img:
-                        st.image(display_img, caption="参考画像（アングル・服装）", width=180)
+                        st.image(display_img, caption="参考画像", width=180)
                     else:
                         st.info(f"参考デート案:\n\n{ref_text}")
 
                 with col_res:
                     st.code(final_p, language=None)
-                    # コピーボタン
                     escaped_p = final_p.replace('`', '\\`').replace('$', '\\$')
                     html(f"""<button onclick="navigator.clipboard.writeText(`{escaped_p}`)">📋 プロンプトをコピー</button>""")
-
+                    
 st.markdown("---")
 st.caption("Higgsfield Gen v11.1 | Strategy by note. Model: Grok-4 / Nano Banana Pro Ready")
