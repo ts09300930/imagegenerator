@@ -112,11 +112,10 @@ SKIN REALISM — always include these tags:
 - subsurface scattering, translucent skin, natural skin tone, soft skin highlight
 - natural under-eye texture, faint laugh lines, realistic lip texture
 
-SINGLE IMAGE — always include these tags to prevent collage/grid output:
+SINGLE IMAGE — always include these tags:
 - single photo, single frame, single shot, one person, solo
-- no collage, no grid, no split screen, no multiple panels, no side by side, no duplicates
 
-NEVER include: blurry, 8k, soft focus, film grain, text on clothing, watermark, logo, anime, illustration, painting, drawing, cartoon, collage, grid, multiple views, split screen"""
+NEVER include: blurry, 8k, soft focus, film grain, text on clothing, watermark, logo, anime, illustration, painting, drawing, cartoon"""
 
     user_content = [
         {
